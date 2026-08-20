@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import config
 
 METRIC_KEYS = (
-    "total_return", "cagr", "volatility", "sharpe", "sortino",
+    "periods_per_year", "total_return", "cagr", "volatility", "sharpe", "sortino",
     "max_drawdown", "max_drawdown_days", "hit_rate", "profit_factor",
     "n_trades", "exposure", "avg_position", "turnover_per_year", "n_days",
 )
@@ -92,6 +92,7 @@ def run(
     lag: int | None = None,
     cost_per_turn: float | None = None,
     score_from: pd.Timestamp | None = None,
+    periods_per_year: int | None = None,
 ) -> BacktestResult:
     """Ejecuta una señal sobre una serie de precios.
 
@@ -110,6 +111,11 @@ def run(
     """
     lag = config.OFFICIAL_LAG if lag is None else lag
     cost_per_turn = config.COST_PER_TURN if cost_per_turn is None else cost_per_turn
+    # 365 en cripto (24/7); 252 en oro, S&P y divisas. Anualizar un mercado de
+    # 252 sesiones con 365 infla el Sharpe un 20 %.
+    periods_per_year = (
+        config.TRADING_DAYS_PER_YEAR if periods_per_year is None else periods_per_year
+    )
     if lag < 1:
         raise ValueError("lag < 1 es lookahead por definición")
     _validate(prices, signal)
@@ -133,14 +139,16 @@ def run(
         equity = (1.0 + returns).cumprod()
 
     trades = _extract_trades(position, returns, equity)
-    metrics = _metrics(returns, equity, position, turnover, trades)
+    metrics = _metrics(returns, equity, position, turnover, trades, periods_per_year)
     return BacktestResult(
         returns=returns, equity=equity, position=position,
         trades=trades, metrics=metrics, lag=lag,
     )
 
 
-def buy_and_hold(prices: pd.DataFrame, lag: int | None = None) -> BacktestResult:
+def buy_and_hold(
+    prices: pd.DataFrame, lag: int | None = None, periods_per_year: int | None = None
+) -> BacktestResult:
     """Benchmark obligatorio (regla 5). Mismos costes: paga una entrada.
 
     Se ejecuta por el mismo motor a propósito. Un benchmark calculado aparte es un
@@ -148,7 +156,7 @@ def buy_and_hold(prices: pd.DataFrame, lag: int | None = None) -> BacktestResult
     los bugs.
     """
     signal = pd.Series(1.0, index=prices.index)
-    return run(prices, signal, lag=lag)
+    return run(prices, signal, lag=lag, periods_per_year=periods_per_year)
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +233,10 @@ def _metrics(
     position: pd.Series,
     turnover: pd.Series,
     trades: pd.DataFrame,
+    periods_per_year: int | None = None,
 ) -> dict:
     n_days = len(returns)
-    ann = config.TRADING_DAYS_PER_YEAR
+    ann = config.TRADING_DAYS_PER_YEAR if periods_per_year is None else periods_per_year
     years = n_days / ann if n_days else np.nan
 
     total_return = float(equity.iloc[-1] - 1.0) if n_days else 0.0
@@ -256,6 +265,7 @@ def _metrics(
         hit_rate, profit_factor = np.nan, np.nan
 
     return {
+        "periods_per_year": ann,
         "total_return": total_return,
         "cagr": cagr,
         "volatility": vol,

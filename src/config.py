@@ -147,3 +147,28 @@ EXTERNAL_VALIDATION_TICKERS = {
     "EURUSD": "EURUSD=X",
     "USDJPY": "USDJPY=X",
 }
+
+# Umbrales que promueven una estrategia a "necesita validación fuera de cripto"
+# como conjunto PRIMARIO, no como test final (Enmienda 2, E2.4).
+EXTERNAL_REQUIRED_LOOKBACK = 100
+EXTERNAL_REQUIRED_WARMUP = 200
+
+# Estos mercados no cotizan 24/7: ~252 sesiones al año y huecos legítimos de
+# calendario (fines de semana, festivos). La anualización y el validador de
+# integridad los tratan aparte.
+EXTERNAL_TRADING_DAYS_PER_YEAR = 252
+
+# Splits para los activos externos. `deep_oos` es todo lo anterior al TRAIN de
+# cripto: décadas que NINGÚN parámetro de este proyecto ha visto, porque los
+# parámetros se ajustan en el TRAIN de cripto y aquí se aplican sin reoptimizar.
+#
+# AVISO: `deep_oos` NO es un segundo lockbox. En cuanto se use para elegir entre
+# finalistas deja de ser virgen y pasa a ser un conjunto de selección. Se declara
+# como tal desde el principio en lugar de fingir después que era una prueba
+# independiente.
+EXTERNAL_SPLITS = {
+    "deep_oos": (None, "2014-12-31"),
+    "train": ("2015-01-01", "2020-12-31"),
+    "validation": ("2021-01-01", "2023-12-31"),
+    "lockbox": ("2024-01-01", None),
+}

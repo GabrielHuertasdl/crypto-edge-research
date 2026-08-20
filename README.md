@@ -45,7 +45,7 @@ src/config.py      constantes: costes, splits, semillas (única fuente de verdad
 src/data_loader.py descarga, caché, integridad, splits
 src/indicators.py  indicadores, todos causales
 src/backtest.py    motor vectorizado + métricas
-src/strategies.py  universo de estrategias, cada una con su tesis económica
+src/strategies.py  23 estrategias, cada una con su tesis económica declarada
 src/validation.py  CPCV purgado, robustez, subperiodos, block bootstrap
 src/statistics.py  block bootstrap, IC del Sharpe, Deflated Sharpe, PBO
 src/trial_registry.py registro append-only de configuraciones evaluadas
@@ -58,8 +58,8 @@ tests/             motor, lookahead, costes
 
 - [x] **Fase 0** — Setup: estructura, entorno, reglas, guardia del lockbox
 - [x] **Fase 1** — Datos: descarga, caché, validación de integridad
-- [x] **Fase 2** — Motor + indicadores + CPCV purgado + estadística, 168 tests en verde
-- [ ] **Fase 3** — Universo de 15-25 estrategias con tesis económica
+- [x] **Fase 2** — Motor + indicadores + CPCV purgado + estadística
+- [x] **Fase 3** — 23 estrategias, 149 configuraciones, tesis obligatoria + datos externos
 - [ ] **Fase 4** — CPCV purgado, robustez, DSR y PBO
 - [ ] **Fase 5** — Lockbox (una sola vez)
 - [ ] **Fase 6** — `results/INFORME.md` con veredicto explícito

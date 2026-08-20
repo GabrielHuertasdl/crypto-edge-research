@@ -278,6 +278,73 @@ def split(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Activos externos (Enmienda 2, E2.4)
+# ---------------------------------------------------------------------------
+def download_external(name: str, force_refresh: bool = False) -> pd.DataFrame:
+    """Oro, S&P 500 y divisas vía yfinance.
+
+    Aquí yfinance **sí** es la serie de trabajo, y no contradice la regla 6-bis:
+    esa regla la degrada a detector de anomalías para los activos que se operan.
+    Estos no se operan — sirven para comprobar que una familia de estrategias no
+    es un artefacto de cripto — y no hay una segunda fuente gratuita con décadas
+    de historia diaria.
+    """
+    import yfinance as yf
+
+    if name not in config.EXTERNAL_VALIDATION_TICKERS:
+        raise KeyError(f"{name!r} no está en EXTERNAL_VALIDATION_TICKERS")
+    path = _raw_path(name, "yfinance_ext")
+    if path.exists() and not force_refresh:
+        return _read_cached(path)
+
+    raw = yf.Ticker(config.EXTERNAL_VALIDATION_TICKERS[name]).history(
+        period="max", interval="1d", auto_adjust=False
+    )
+    if raw.empty:
+        raise RuntimeError(f"{name}: yfinance no devolvió datos")
+    raw.index = pd.to_datetime(raw.index, utc=True).normalize()
+    df = raw.rename(columns=str.lower)[OHLCV_COLS].sort_index()
+    df = df[~df.index.duplicated(keep="first")].astype(float)
+    # Sesiones sin negociación (festivos parciales, divisas en fin de semana):
+    # precio congelado, no precio. Fuera.
+    plana = (df["open"] == df["high"]) & (df["high"] == df["low"]) & (df["low"] == df["close"])
+    df = df[~plana]
+    df = df[(df[["open", "high", "low", "close"]] > 0).all(axis=1)]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path)
+    return df
+
+
+def load_external(name: str) -> pd.DataFrame:
+    return download_external(name)
+
+
+def split_external(df: pd.DataFrame, name: str) -> pd.DataFrame:
+    """Corta por `config.EXTERNAL_SPLITS`. Incluye `deep_oos` (todo lo anterior a
+    2015), que es donde están los regímenes independientes que a cripto le faltan."""
+    if name not in config.EXTERNAL_SPLITS:
+        raise KeyError(f"Split externo desconocido: {name!r}")
+    start, end = config.EXTERNAL_SPLITS[name]
+    lo = pd.Timestamp(start, tz="UTC") if start else df.index[0]
+    hi = pd.Timestamp(end, tz="UTC") if end else df.index[-1]
+    return df.loc[lo:hi]
+
+
+def validate_external_integrity(df: pd.DataFrame, name: str) -> IntegrityReport:
+    """Como `validate_integrity`, pero los huecos de calendario NO son un defecto:
+    estos mercados cierran fines de semana y festivos. Lo que sí se vigila es que
+    no haya huecos largos (más de 5 días naturales seguidos), que sí indicarían
+    datos perdidos y no un puente."""
+    rep = validate_integrity(df, name, "yfinance_ext")
+    saltos = df.index.to_series().diff().dt.days
+    rep.missing_days = [
+        d.strftime("%Y-%m-%d") for d in df.index[saltos > 5]
+    ]
+    return rep
+
+
+# ---------------------------------------------------------------------------
 # Fase 1 — informe de calidad de datos
 # ---------------------------------------------------------------------------
 def _fmt_list(items: list, limit: int = 12) -> str:
