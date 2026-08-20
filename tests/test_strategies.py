@@ -17,6 +17,19 @@ sys.path.insert(0, str(ROOT))
 from src import config, strategies as sg  # noqa: E402
 
 TODAS = [(s, p) for s in sg.UNIVERSE for p in s.grid()]
+
+# Cota del error de acumulación en coma flotante.
+#
+# Las ventanas móviles de pandas se calculan con sumas acumuladas, así que una
+# perturbación lejana deja residuos numéricos aunque no haya ninguna dependencia
+# real. El error de T sumas encadenadas está acotado por ~T·eps en el peor caso;
+# se toma 64·eps·T como margen holgado y AUN ASÍ muy por debajo de cualquier
+# dependencia con significado económico.
+#
+# Con T = 900 esto da 1,3e-11. La tolerancia anterior era 1e-6: nueve órdenes de
+# magnitud de sitio donde esconder una dependencia real.
+def tolerancia_numerica(n: int) -> float:
+    return 64.0 * float(np.finfo(float).eps) * n
 IDS = [f"{s.name}-{'_'.join(f'{k}{v}' for k, v in p.items())}" for s, p in TODAS]
 
 
@@ -146,13 +159,18 @@ def test_el_calentamiento_declarado_cubre_la_dependencia_real(spec, params, prec
     # Con tolerancia: las medias móviles de pandas usan sumas acumuladas, así que
     # una perturbación lejana deja diferencias a nivel de bit que no son
     # dependencia real. Lo que se persigue es un cambio de exposición de verdad.
+    tol = tolerancia_numerica(len(precios))
     difieren = float(
-        (~np.isclose(base.iloc[cola], otra.iloc[cola], rtol=1e-6, atol=1e-9)).mean()
+        (~np.isclose(base.iloc[cola], otra.iloc[cola], rtol=tol, atol=tol)).mean()
     )
-    assert difieren <= 0.05, (
+    # Memoria acotada: ventanas finitas y sin estado -> tolerancia CERO.
+    # Memoria no acotada (EMA, o máquina de estados con ffill): se admite un
+    # residuo, porque una posición abierta puede sobrevivir al calentamiento.
+    maximo = 0.0 if spec.bounded_memory else 0.05
+    assert difieren <= maximo, (
         f"{spec.name}: alterar un precio {w} días antes cambia el "
-        f"{difieren:.0%} de las señales posteriores; el calentamiento declarado "
-        "se queda corto"
+        f"{difieren:.1%} de las señales posteriores (máximo admitido "
+        f"{maximo:.0%}); el calentamiento declarado se queda corto"
     )
 
 
@@ -224,3 +242,64 @@ def test_build_rechaza_exposicion_invalida(precios):
     )
     with pytest.raises(ValueError, match="fuera de"):
         mala.build(precios, {})
+
+
+# ---------------------------------------------------------------------------
+# El test de perturbación tiene que detectar lo que dice detectar
+# ---------------------------------------------------------------------------
+def test_la_tolerancia_es_del_orden_del_error_de_acumulacion():
+    """Debe estar muy por encima del ruido de coma flotante y muy por debajo de
+    cualquier dependencia real."""
+    tol = tolerancia_numerica(900)
+    assert 1e-13 < tol < 1e-9, tol
+
+
+def test_el_test_de_perturbacion_detecta_una_dependencia_apenas_por_encima_de_la_cota():
+    """Control positivo del control.
+
+    Se fabrica una estrategia que declara un calentamiento de 30 días pero mira en
+    secreto el precio de hace 400, con un peso apenas superior a la tolerancia. Si
+    el test de perturbación no la caza, no está midiendo nada.
+    """
+    n = 900
+    rng = np.random.default_rng(77)
+    c = pd.Series(
+        100 * np.cumprod(1 + rng.normal(0.0005, 0.02, n)),
+        index=pd.date_range("2016-01-01", periods=n, freq="D", tz="UTC"),
+    )
+    df = pd.DataFrame(
+        {"open": c, "high": c * 1.01, "low": c * 0.99, "close": c, "volume": 1.0}, index=c.index
+    )
+
+    K = 200
+    peso = 100 * tolerancia_numerica(n)      # apenas por encima de la cota
+
+    def tramposa(df, n_ma):
+        base = (df["close"] > df["close"].rolling(n_ma, min_periods=n_ma).mean()).astype(float)
+        # Fuga: mira el precio de hace K días, muy por detrás del calentamiento
+        # declarado de 30, con un peso ridículo pero superior a la cota numérica.
+        fuga = (df["close"].shift(K) / df["close"]).fillna(0.0)
+        return (base * (1 - peso) + peso * fuga).clip(0.0, 1.0)
+
+    spec = sg.StrategySpec(
+        "tramposa", tramposa, {"n_ma": [20]},
+        lookback=lambda p: p["n_ma"], warmup=lambda p: 30,
+        thesis=None, family="control", bounded_memory=True,
+    )
+    params = {"n_ma": 20}
+    w = spec.warmup_for(params)
+
+    base = spec.build(df, params)
+    alterado = df.copy()
+    pos = 400                                 # la fuga aflora en pos + K = 600
+    for col in ("open", "high", "low", "close"):
+        alterado.iloc[pos, alterado.columns.get_loc(col)] *= 1.25
+    otra = spec.build(alterado, params)
+
+    tol = tolerancia_numerica(n)
+    cola = slice(pos + w, None)
+    difieren = float((~np.isclose(base.iloc[cola], otra.iloc[cola], rtol=tol, atol=tol)).mean())
+    assert difieren > 0.0, (
+        f"el test de perturbación NO detecta una dependencia de peso {peso:.1e} "
+        f"a {K} días con tolerancia {tol:.1e}"
+    )

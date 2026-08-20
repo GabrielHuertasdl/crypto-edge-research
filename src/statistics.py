@@ -407,3 +407,236 @@ def dsr_pvalue(
     """
     nula = dsr_null_distribution(n_obs, n_configs, rho, n_sims, seed)
     return float((nula >= observed_dsr).mean())
+
+
+# ---------------------------------------------------------------------------
+# Nulo de exposición equiparada
+# ---------------------------------------------------------------------------
+def _strategy_returns_matrix(
+    r: np.ndarray, positions: np.ndarray, cost_per_turn: float
+) -> np.ndarray:
+    """Réplica vectorizada de `backtest.run` para muchas posiciones a la vez.
+
+    `positions` es (n_paths, T). Misma aritmética que el motor, verificada contra
+    él en `tests/test_matched_null.py`: si divergen, el nulo mediría otra cosa.
+    """
+    prev = np.concatenate([np.zeros((positions.shape[0], 1)), positions[:, :-1]], axis=1)
+    turnover = np.abs(positions - prev)
+    return positions * r[None, :] - turnover * cost_per_turn
+
+
+def _rotated_positions(position: np.ndarray, n_paths: int, rng) -> np.ndarray:
+    """Rotaciones circulares de la MISMA senda de posiciones.
+
+    Conserva exactamente la exposición, la rotación y hasta la distribución de la
+    duración de las operaciones; lo único que destruye es la alineación con los
+    retornos. Es el nulo más ajustado posible: cualquier diferencia de Sharpe solo
+    puede venir de saber CUÁNDO estar dentro.
+    """
+    T = len(position)
+    desfases = rng.choice(np.arange(1, T), size=n_paths, replace=T <= n_paths)
+    idx = (np.arange(T)[None, :] + desfases[:, None]) % T
+    return position[idx]
+
+
+def _markov_positions(
+    exposure: float, turnover_per_day: float, T: int, n_paths: int, rng
+) -> np.ndarray:
+    """Cadena de Markov de dos estados con exposición y rotación equiparadas.
+
+    Estacionaria en `exposure`; `p10 = rot / (2·e)` y `p01 = rot / (2·(1−e))`
+    reproducen la rotación media. Complementa a las rotaciones: no reutiliza la
+    senda real, así que no arrastra su forma.
+    """
+    e = float(np.clip(exposure, 1e-6, 1 - 1e-6))
+    p10 = float(np.clip(turnover_per_day / (2 * e), 0.0, 1.0))
+    p01 = float(np.clip(turnover_per_day / (2 * (1 - e)), 0.0, 1.0))
+
+    out = np.empty((n_paths, T))
+    cur = (rng.random(n_paths) < e).astype(float)
+    for t in range(T):
+        u = rng.random(n_paths)
+        cur = np.where(cur > 0, np.where(u < p10, 0.0, 1.0), np.where(u < p01, 1.0, 0.0))
+        out[:, t] = cur
+    return out
+
+
+@dataclass(frozen=True)
+class MatchedNullResult:
+    observed_sharpe: float
+    null_sharpes: np.ndarray
+    percentile: float
+    p95: float
+    exposure: float
+    turnover_per_day: float
+    method: str
+
+    @property
+    def passes(self) -> bool:
+        """Criterio: superar el percentil 95 del nulo equiparado."""
+        return self.observed_sharpe > self.p95
+
+    def __str__(self) -> str:
+        return (
+            f"SR={self.observed_sharpe:.2f} vs nulo equiparado p95={self.p95:.2f} "
+            f"(percentil {self.percentile:.1%}, exp={self.exposure:.0%}, "
+            f"rot/día={self.turnover_per_day:.3f}, {self.method})"
+        )
+
+
+def matched_exposure_null(
+    returns: np.ndarray,
+    position: np.ndarray,
+    observed_sharpe: float | None = None,
+    n_paths: int | None = None,
+    method: str = "rotation",
+    cost_per_turn: float | None = None,
+    periods_per_year: int | None = None,
+    seed: int | None = None,
+) -> MatchedNullResult:
+    """Nulo con exposición y rotación equiparadas sobre el activo REAL.
+
+    Motivo, medido sobre el TRAIN de BTC (CAGR del 134 %): señales **aleatorias**
+    con 55 % de exposición y rotación realista alcanzan Sharpe ≥ 0,70 el **90 %**
+    de las veces. Sobre la misma serie con la deriva quitada, el 0,8 %.
+
+    Es decir: la tasa de falso positivo de un umbral absoluto de Sharpe la fija la
+    deriva del activo, no la estrategia. Comparar contra buy & hold al 100 % de
+    exposición tampoco lo arregla, porque una estrategia expuesta el 55 % del
+    tiempo asume menos riesgo y no tiene por qué batirlo en Sharpe.
+
+    Este nulo no sustituye a C9 (block bootstrap de los retornos, que pregunta si
+    la SERIE tiene estructura explotable). Pregunta otra cosa: dado que estás
+    dentro del mercado tanto tiempo y rotas tanto, ¿aporta algo saber CUÁNDO?
+    """
+    r = np.asarray(returns, dtype=float)
+    pos = np.asarray(position, dtype=float)
+    if len(r) != len(pos):
+        raise ValueError("retornos y posiciones deben tener la misma longitud")
+    if method not in {"rotation", "markov"}:
+        raise ValueError("method debe ser 'rotation' o 'markov'")
+
+    n_paths = config.N_SYNTHETIC_PATHS if n_paths is None else n_paths
+    cost_per_turn = config.COST_PER_TURN if cost_per_turn is None else cost_per_turn
+    periods = config.TRADING_DAYS_PER_YEAR if periods_per_year is None else periods_per_year
+    rng = np.random.default_rng(config.SEED if seed is None else seed)
+
+    exposure = float((pos > 0).mean())
+    turnover = float(np.abs(np.diff(np.concatenate([[0.0], pos]))).sum() / len(pos))
+
+    if method == "rotation":
+        paths = _rotated_positions(pos, n_paths, rng)
+    else:
+        paths = _markov_positions(exposure, turnover, len(pos), n_paths, rng)
+        # Escala a la exposición media real para que valgan también las
+        # estrategias de posición fraccionaria.
+        media = pos[pos > 0].mean() if (pos > 0).any() else 0.0
+        paths = paths * media
+
+    rets = _strategy_returns_matrix(r, paths, cost_per_turn)
+    sd = rets.std(axis=1, ddof=1)
+    srs = np.divide(
+        rets.mean(axis=1) * np.sqrt(periods), sd, out=np.zeros(len(rets)), where=sd > 0
+    )
+
+    if observed_sharpe is None:
+        obs_rets = _strategy_returns_matrix(r, pos[None, :], cost_per_turn)[0]
+        observed_sharpe = annualized_sharpe(obs_rets, periods)
+
+    return MatchedNullResult(
+        observed_sharpe=float(observed_sharpe),
+        null_sharpes=srs,
+        percentile=float((srs < observed_sharpe).mean()),
+        p95=float(np.quantile(srs, 0.95)),
+        exposure=exposure,
+        turnover_per_day=turnover,
+        method=method,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Intentos efectivamente independientes
+# ---------------------------------------------------------------------------
+def effective_number_of_trials(returns_matrix: np.ndarray) -> float:
+    """`N_eff` por participación de autovalores: `(Σλ)² / Σλ²`.
+
+    Un `ρ̄` único no describe la estructura real: dentro de una familia las
+    parametrizaciones correlacionan ~0,95 y entre familias mucho menos. La
+    participación de autovalores sobre la matriz de correlación de los retornos de
+    los intentos resume esa estructura en un solo número, y es la misma idea que
+    `N_eff` en C8c.
+
+    Usar `N` en bruto en el DSR **sobrepenaliza**: 149 configuraciones que en
+    realidad son 8 apuestas distintas no equivalen a 149 intentos independientes.
+    Usar `N_eff` es la corrección estándar. Se reportan ambos.
+    """
+    M = np.asarray(returns_matrix, dtype=float)
+    if M.ndim != 2 or M.shape[1] < 2:
+        return float(max(M.shape[1] if M.ndim == 2 else 1, 1))
+    sd = M.std(axis=0, ddof=1)
+    vivas = sd > 0
+    if vivas.sum() < 2:
+        return float(max(int(vivas.sum()), 1))
+    C = np.corrcoef(M[:, vivas], rowvar=False)
+    C = np.nan_to_num(C, nan=0.0)
+    lam = np.linalg.eigvalsh(C)
+    lam = np.clip(lam, 0.0, None)
+    if lam.sum() <= 0:
+        return 1.0
+    return float(lam.sum() ** 2 / (lam**2).sum())
+
+
+@dataclass(frozen=True)
+class DeflatedSharpeReport:
+    dsr: float
+    p_value: float
+    n_trials_raw: int
+    n_trials_effective: float
+    sr_variance_periodic: float
+    sr0_periodic: float
+
+    @property
+    def passes(self) -> bool:
+        """C5 tras la Enmienda 2: umbral nominal Y p-valor calibrado."""
+        return self.dsr >= 0.95 and self.p_value <= 0.05
+
+    def __str__(self) -> str:
+        return (
+            f"DSR={self.dsr:.3f} (p={self.p_value:.3f}) con N={self.n_trials_raw} "
+            f"intentos, N_eff={self.n_trials_effective:.1f}"
+        )
+
+
+def deflated_sharpe_report(
+    returns_best: np.ndarray,
+    trials_matrix: np.ndarray,
+    n_sims: int = 400,
+    periods_per_year: int | None = None,
+    seed: int | None = None,
+) -> DeflatedSharpeReport:
+    """DSR usando el número EFECTIVO de intentos independientes.
+
+    `trials_matrix` es (T, N): los retornos diarios de todas las configuraciones
+    evaluadas, sobre el mismo periodo. De ahí salen las tres cosas que el DSR
+    necesita y que no se pueden inventar: la varianza de los Sharpes, el número
+    efectivo de intentos y la estructura de correlación con la que simular la nula.
+    """
+    periods = config.TRADING_DAYS_PER_YEAR if periods_per_year is None else periods_per_year
+    M = np.asarray(trials_matrix, dtype=float)
+    n_raw = int(M.shape[1])
+    n_eff = effective_number_of_trials(M)
+
+    sd = M.std(axis=0, ddof=1)
+    sr = np.divide(M.mean(axis=0), sd, out=np.zeros(n_raw), where=sd > 0)
+    var_sr = float(np.var(sr, ddof=1)) if n_raw > 1 else 0.0
+
+    n_para_dsr = max(int(round(n_eff)), 1)
+    dsr = deflated_sharpe_ratio(returns_best, n_para_dsr, var_sr, periods)
+    # La nula se simula con N_eff intentos INDEPENDIENTES: N_eff ya absorbe la
+    # correlación, así que volver a meterla como rho la contaría dos veces.
+    p = dsr_pvalue(dsr, len(returns_best), n_para_dsr, rho=0.0, n_sims=n_sims, seed=seed)
+    return DeflatedSharpeReport(
+        dsr=dsr, p_value=p, n_trials_raw=n_raw, n_trials_effective=n_eff,
+        sr_variance_periodic=var_sr,
+        sr0_periodic=expected_max_sharpe(var_sr, n_para_dsr),
+    )

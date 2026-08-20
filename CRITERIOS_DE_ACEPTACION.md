@@ -333,3 +333,83 @@ Por tanto:
   quiere operar**. Que una estrategia funcione ahí es evidencia de que la familia
   no es un artefacto, no de que vaya a funcionar en cripto. El informe mantendrá
   las dos cosas separadas.
+
+---
+
+# Enmienda 3 — 2026-08-20
+
+**Última enmienda anterior al primer trial.** `results/trials_log.csv` sigue sin
+existir en el commit que la introduce. A partir del commit siguiente, cualquier
+cambio de criterio se considera posterior a los resultados y el informe lo tratará
+como tal.
+
+## E3.1 · Control de exposición equiparada (nuevo criterio C12)
+
+Medición sobre el TRAIN de BTC (CAGR del 134 %), señales **aleatorias** con
+exposición y rotación realistas, costes incluidos:
+
+| Serie | Exposición | Rotación/día | Sharpe medio | P(Sharpe ≥ 0,70) | p95 |
+|---|---:|---:|---:|---:|---:|
+| BTC real | 55 % | 0,05 | 1,09 | **90,5 %** | 1,54 |
+| BTC real | 55 % | 0,20 | 0,94 | **80,8 %** | 1,44 |
+| BTC sin deriva | 55 % | 0,05 | −0,04 | 0,8 % | 0,49 |
+| BTC sin deriva | 55 % | 0,20 | −0,20 | 0,2 % | 0,24 |
+
+**Nueve de cada diez señales aleatorias superan C1 en el TRAIN de BTC.** Quitada
+la deriva, menos de una de cada cien. La tasa de falso positivo de un umbral
+absoluto de Sharpe la fija la deriva del activo, no la estrategia.
+
+El benchmark de buy & hold no lo arregla: está al 100 % de exposición, mientras
+que las estrategias del universo andan entre el 10 % y el 70 %. Comparar Sharpes
+entre exposiciones distintas compara dos cosas diferentes.
+
+**C12 (nuevo):** toda configuración debe superar el **percentil 95** de un nulo
+con **exposición y rotación equiparadas** sobre el activo real
+(`statistics.matched_exposure_null`). Dos métodos, ambos reportados:
+
+- `rotation`: rotaciones circulares de la propia senda de posiciones. Conserva
+  exactamente exposición, rotación y duración de las operaciones; solo destruye la
+  alineación con los retornos. Es el nulo más ajustado posible.
+- `markov`: cadena de dos estados con exposición y rotación equiparadas, sin
+  reutilizar la senda real.
+
+C12 **se suma** a C9, no lo sustituye. Preguntan cosas distintas: C9 pregunta si la
+serie de precios tiene estructura explotable; C12 pregunta si, dado que estás
+dentro del mercado tanto tiempo, aporta algo saber *cuándo*.
+
+Primera aplicación, antes de la fase 4: `sma_cross(20, 100)` sobre el TRAIN de BTC
+da Sharpe 1,55 contra un p95 del nulo equiparado de 1,71 — **percentil 90,6 %, no
+supera C12**. Registrado como trial de exploración.
+
+## E3.2 · El DSR usa el número EFECTIVO de intentos
+
+Un `ρ̄` único no describe la estructura: dentro de una familia las
+parametrizaciones correlacionan ~0,95, entre familias mucho menos.
+
+`statistics.effective_number_of_trials` calcula `N_eff = (Σλ)² / Σλ²` por
+participación de autovalores sobre la matriz de correlación de los retornos de los
+intentos — la misma construcción que `N_eff` en C8c.
+
+- El DSR se calcula con `N_eff`, no con `N` en bruto. Usar `N` sobrepenaliza:
+  149 configuraciones que en el fondo son 8 apuestas no son 149 intentos
+  independientes.
+- La nula del p-valor se simula con `N_eff` intentos **independientes**: `N_eff`
+  ya absorbe la correlación, y volver a meterla como `ρ` la contaría dos veces.
+- El informe publica **`N`, `N_eff` y su cociente**. Un cociente muy alto significa
+  que el universo explora mucho menos de lo que aparenta.
+
+## E3.3 · Tolerancia del test de perturbación, derivada y con control positivo
+
+La tolerancia de 1e-6 era arbitraria y dejaba nueve órdenes de magnitud para
+esconder una dependencia real. Ahora:
+
+- **Cota derivada**: `64 · eps · T`, del error de T sumas encadenadas de las
+  ventanas móviles de pandas. Con T=900 son **1,3e-11**.
+- **Dos clases de estrategia**: las de *memoria acotada* (ventanas finitas, sin
+  estado: 8 de las 23) exigen **tolerancia cero** — alterar un precio más allá del
+  calentamiento no puede cambiar nada. Las de memoria no acotada (medias
+  exponenciales, o máquina de estados con `ffill`) admiten un residuo del 5 %,
+  porque una posición abierta puede sobrevivir al calentamiento.
+- **Control positivo del control**: un test inyecta una dependencia a 200 días con
+  peso apenas superior a la cota y exige que el test de perturbación la detecte. Si
+  alguien afloja la tolerancia, ese test falla.

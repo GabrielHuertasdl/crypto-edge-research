@@ -54,6 +54,14 @@ class StrategySpec:
     thesis: str | None
     warmup: Callable[[dict], int] | None = None
     family: str = "sin clasificar"
+    bounded_memory: bool = False
+    """True si la señal solo usa ventanas móviles finitas y no arrastra estado.
+
+    Para esas, alterar un precio más allá del calentamiento no puede cambiar NADA
+    de la señal posterior, y el test de perturbación lo exige con tolerancia cero.
+    Las que usan medias exponenciales (memoria infinita, decae pero nunca se
+    anula) o una máquina de estados con `ffill` sí pueden arrastrar el efecto, y
+    ahí se admite un residuo pequeño."""
 
     @property
     def has_thesis(self) -> bool:
@@ -343,6 +351,8 @@ UNIVERSE: list[StrategySpec] = [
         {"fast": [10, 20, 50], "slow": [50, 100, 200]},
         lookback=lambda p: p["slow"], warmup=lambda p: 2 * p["slow"],
         thesis=TESIS_TENDENCIA, family="tendencia",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "ema_cross", ema_cross,
@@ -355,18 +365,24 @@ UNIVERSE: list[StrategySpec] = [
         {"n": [20, 50, 100, 200]},
         lookback=lambda p: p["n"], warmup=lambda p: 2 * p["n"],
         thesis=TESIS_TENDENCIA, family="tendencia",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "ts_momentum", ts_momentum,
         {"n": [20, 60, 120, 250]},
         lookback=lambda p: p["n"], warmup=lambda p: 2 * p["n"],
         thesis=TESIS_TENDENCIA, family="tendencia",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "ma_slope", ma_slope,
         {"n": [20, 50, 100]},
         lookback=lambda p: 2 * p["n"], warmup=lambda p: 3 * p["n"],
         thesis=TESIS_TENDENCIA, family="tendencia",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "macd_cross", macd_cross,
@@ -432,6 +448,8 @@ UNIVERSE: list[StrategySpec] = [
         {"n": [20, 60], "objetivo": [0.30, 0.50, 0.70], "maximo": [1.0]},
         lookback=lambda p: p["n"] + 1, warmup=lambda p: 3 * p["n"],
         thesis=TESIS_VOLATILIDAD, family="volatilidad",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "low_vol_filter", low_vol_filter,
@@ -439,6 +457,8 @@ UNIVERSE: list[StrategySpec] = [
         lookback=lambda p: p["ventana_mediana"] + p["n"],
         warmup=lambda p: 2 * (p["ventana_mediana"] + p["n"]),
         thesis=TESIS_VOLATILIDAD, family="volatilidad",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "vol_expansion_breakout", vol_expansion_breakout,
@@ -453,6 +473,8 @@ UNIVERSE: list[StrategySpec] = [
         {"n_trend": [50, 100], "n_vol": [20, 60], "percentil": [0.7, 0.9]},
         lookback=lambda p: 252 + p["n_vol"], warmup=lambda p: 400,
         thesis=TESIS_REGIMEN, family="regimen",
+    
+        bounded_memory=True,
     ),
     StrategySpec(
         "rsi_reversion_in_uptrend", rsi_reversion_in_uptrend,
@@ -478,6 +500,8 @@ UNIVERSE: list[StrategySpec] = [
         {"n_fast": [20, 50], "n_regime": [150, 200]},
         lookback=lambda p: p["n_regime"], warmup=lambda p: 2 * p["n_regime"],
         thesis=TESIS_REGIMEN, family="regimen",
+    
+        bounded_memory=True,
     ),
     # --- calendario --------------------------------------------------------
     StrategySpec(
