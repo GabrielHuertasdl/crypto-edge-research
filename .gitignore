@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Datos crudos: pesados y reproducibles con data_loader. No van al repo.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Resultados generados
+results/figures/*
+!results/figures/.gitkeep
+
+# EXCEPCIÓN: el centinela del lockbox SÍ se versiona. Es la prueba de que la
+# evaluación final se ejecutó una sola vez.
+!lockbox/.lockbox_used

@@ -1,0 +1,17 @@
+# --- Núcleo numérico ---
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+
+# --- Datos de mercado ---
+ccxt>=4.2            # Kraken / Coinbase OHLCV (fuente primaria)
+yfinance>=0.2.40     # fuente de respaldo / cross-check
+
+# --- Gráficos ---
+matplotlib>=3.8
+
+# --- Tests ---
+pytest>=8.0
+
+# --- Exploración (opcional, notebooks/) ---
+jupyterlab>=4.0
