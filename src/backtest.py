@@ -283,6 +283,35 @@ def _metrics(
     }
 
 
+def combine(
+    results: list["BacktestResult"], periods_per_year: int | None = None
+) -> "BacktestResult":
+    """Encadena resultados de tramos disjuntos en una sola curva.
+
+    Se usa para pegar los bloques fuera de muestra del CPCV, que se evalúan por
+    separado con el estado reiniciado. La curva de capital se recalcula desde 1,0
+    sobre los retornos concatenados: encadenar equities de tramos independientes
+    multiplicando sus finales daría lo mismo, pero recalcular deja explícito que
+    no hay continuidad de posición entre bloques.
+    """
+    if not results:
+        raise ValueError("nada que combinar")
+    returns = pd.concat([r.returns for r in results]).sort_index()
+    position = pd.concat([r.position for r in results]).sort_index()
+    if returns.index.has_duplicates:
+        raise ValueError("los tramos combinados se solapan")
+
+    prev = position.shift(1).fillna(0.0)
+    turnover = (position - prev).abs()
+    equity = (1.0 + returns).cumprod()
+    trades = _extract_trades(position, returns, equity)
+    metrics = _metrics(returns, equity, position, turnover, trades, periods_per_year)
+    return BacktestResult(
+        returns=returns, equity=equity, position=position,
+        trades=trades, metrics=metrics, lag=results[0].lag,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Diagnóstico de lag (regla 2)
 # ---------------------------------------------------------------------------
