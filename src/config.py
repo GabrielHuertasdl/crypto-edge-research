@@ -80,17 +80,48 @@ EXECUTION_LAG_DAYS = 1
 EXECUTION_PRICE = "close"
 RETURN_LAG_TOTAL = 2   # desplazamiento total señal -> retorno cobrado
 
+# Lag oficial = 2. El lag 1 se corre EN PARALELO como diagnóstico, nunca como
+# resultado: si el alpha existe con lag 1 y desaparece con lag 2, era un artefacto
+# de un día (microestructura, cierre mal alineado, señal que ya conocía el dato).
+OFFICIAL_LAG = RETURN_LAG_TOTAL
+LAG_VARIANTS = (1, 2)
+
 # --- Posiciones (regla 7) ------------------------------------------------
 MIN_POSITION = 0.0
 MAX_POSITION = 1.0   # long/flat, sin apalancamiento
 
 # --- Validación: CPCV (regla 1 / fase 4) ---------------------------------
-# Combinatorial Purged Cross-Validation (López de Prado). Sustituye al
-# walk-forward simple: da muchos más pliegues out-of-sample sobre un TRAIN corto,
-# y es el método sobre el que está definido el PBO.
-CPCV_N_GROUPS = 6          # N: bloques temporales contiguos
-CPCV_N_TEST_GROUPS = 2     # k: bloques de test por combinación -> C(6,2) = 15
-CPCV_EMBARGO_PCT = 0.01    # embargo: 1 % de la muestra tras cada bloque de test
+# Combinatorial Purged Cross-Validation (López de Prado).
+#
+# Lo que se reporta son CAMINOS, no combinaciones. Con N grupos y k de test hay
+# C(N,k) combinaciones pero solo `k*C(N,k)/N` caminos de backtest completos, y el
+# PBO se estima sobre caminos. Decir "15 pliegues" cuando hay 5 caminos infla la
+# sensación de evidencia por un factor de 3.
+#
+#   N=6  -> C(6,2)=15  combinaciones,  5 caminos, bloque BTC ~332 d
+#   N=10 -> C(10,2)=45 combinaciones,  9 caminos, bloque BTC ~199 d   <- elegido
+#   N=12 -> C(12,2)=66 combinaciones, 11 caminos, bloque BTC ~166 d
+#
+# Elegido N=10: casi dobla los caminos frente a N=6 (5 -> 9) manteniendo bloques
+# de test de ~400 días (2 grupos), suficientes para contener algo más que un solo
+# tramo direccional.
+#
+# TENSIÓN CON D2, explícita: subir N sube el número de caminos, NO el número de
+# regímenes independientes. Los 9 caminos comparten los mismos datos y los mismos
+# ~3 ciclos de mercado. La independencia efectiva sigue acotada por el número de
+# regímenes (un dígito), no por el número de caminos. Los caminos mejoran la
+# ESTIMACIÓN del PBO; no crean evidencia nueva. Va al informe.
+CPCV_N_GROUPS = 10
+CPCV_N_TEST_GROUPS = 2
+CPCV_EMBARGO_PCT = 0.01    # embargo tras cada bloque de test, en fracción de muestra
+
+# Fracción máxima de TRAIN que el purgado puede comerse antes de que la
+# configuración se considere inviable y se marque en el informe.
+CPCV_MAX_PURGED_FRACTION = 0.40
+
+# El span de purgado NO es una constante: se deriva del lookback máximo de cada
+# estrategia (una SMA de 200 arrastra 200 días de solape; purgar 20 no elimina
+# nada). Ver `validation.purge_spans()`.
 
 # --- Estadística ---------------------------------------------------------
 TRADING_DAYS_PER_YEAR = 365   # cripto cotiza 24/7
@@ -103,3 +134,16 @@ SEED = 42
 # dice explotar. Un RW gaussiano es un rival de paja.
 N_SYNTHETIC_PATHS = 1000
 BOOTSTRAP_MEAN_BLOCK_DAYS = 20   # longitud media del bloque geométrico
+
+# --- Validación fuera de cripto (preparado para fase 5) ------------------
+# Si la finalista es de seguimiento de tendencia, se prueba SIN REOPTIMIZAR sobre
+# activos con regímenes de verdad independientes. Es lo único que compensa la
+# escasez de ciclos de D2. Estos mercados NO cotizan 24/7: su calendario tiene
+# huecos legítimos (fines de semana, festivos) y el validador de integridad los
+# trata aparte.
+EXTERNAL_VALIDATION_TICKERS = {
+    "GOLD": "GC=F",       # futuro continuo del oro
+    "SP500": "^GSPC",
+    "EURUSD": "EURUSD=X",
+    "USDJPY": "USDJPY=X",
+}

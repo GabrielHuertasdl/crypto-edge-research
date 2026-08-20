@@ -24,7 +24,8 @@ Las reglas metodológicas están en [`CLAUDE.md`](CLAUDE.md) y son innegociables
 | VALIDATION | 2021-2023 — solo confirmar |
 | LOCKBOX | 2024-hoy — **una sola ejecución, al final** |
 | Benchmark | Buy & hold, mismos costes |
-| Contra el overfitting | CPCV con purging y embargo, Deflated Sharpe, PBO, block bootstrap |
+| Contra el overfitting | CPCV N=10/k=2 (**9 caminos**), purgado derivado del lookback, DSR, PBO, block bootstrap |
+| Pre-registro | `CRITERIOS_DE_ACEPTACION.md`, escrito antes del primer backtest |
 
 ## Instalación
 
@@ -55,7 +56,7 @@ tests/             motor, lookahead, costes
 
 - [x] **Fase 0** — Setup: estructura, entorno, reglas, guardia del lockbox
 - [x] **Fase 1** — Datos: descarga, caché, validación de integridad
-- [ ] **Fase 2** — Motor de backtest + tests unitarios
+- [x] **Fase 2** — Motor de backtest + indicadores + CPCV, 138 tests en verde
 - [ ] **Fase 3** — Universo de 15-25 estrategias con tesis económica
 - [ ] **Fase 4** — CPCV purgado, robustez, DSR y PBO
 - [ ] **Fase 5** — Lockbox (una sola vez)

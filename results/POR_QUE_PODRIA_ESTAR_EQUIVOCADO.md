@@ -49,3 +49,52 @@ BTC, ETH, SOL y LTC comparten factor de mercado con correlaciones diarias altas.
 "funciona en uno" que de "funciona en cuatro". Habrá que reportar la correlación
 entre curvas de equity de la misma estrategia en distintos activos antes de contar
 la estabilidad cross-asset como evidencia.
+
+## D5 · Sesgo de supervivencia en la selección de activos
+*Fase 2.*
+
+BTC, ETH, SOL y LTC están elegidos **porque siguen existiendo y cotizando en
+Coinbase en 2026**. Ninguno es una muestra aleatoria del universo cripto de 2015:
+son los que sobrevivieron.
+
+El universo real de entonces incluía cientos de activos que hoy no cotizan, no
+tienen liquidez o directamente desaparecieron con su exchange. Una estrategia de
+seguimiento de tendencia probada solo sobre supervivientes hereda un sesgo obvio:
+mantener la posición funciona muy bien cuando se sabe de antemano que el activo no
+va a morir. Las estrategias de "comprar la caída" y de reversión a la media son las
+más contaminadas por esto — la caída siempre se recupera... en los que
+sobrevivieron.
+
+Nota adicional: el propio listado en Coinbase es un filtro de calidad aplicado con
+información posterior. SOL entra en 2021-06 **porque ya se había convertido en un
+activo relevante**; en 2020 no habría estado en la lista.
+
+No hay forma limpia de corregir esto con los datos disponibles: reconstruir el
+universo delistado requiere históricos de exchanges que ya no existen. Se declara
+como limitación, se evita cualquier lectura de "funciona en todo el mercado", y
+refuerza la necesidad de la validación fuera de cripto (oro, S&P 500, divisas),
+donde el sesgo de supervivencia del activo es mucho menor.
+
+## D6 · Más caminos CPCV no son más regímenes
+*Fase 2.*
+
+Se ha subido a N=10 grupos (9 caminos frente a los 5 de N=6) para que el PBO se
+estime sobre más caminos. Eso mejora la **estimación**, no la **evidencia**.
+
+Los 9 caminos se construyen con los mismos 1.992 días y los mismos ~3 ciclos de
+mercado. Comparten datos por construcción. Si el proyecto acaba diciendo "válido en
+9 caminos CPCV", eso hay que leerlo como "válido en 3 regímenes, medido 9 veces",
+no como 9 pruebas independientes.
+
+## D7 · El purgado protege contra la fuga mecánica, no contra la memoria del que investiga
+*Fase 2.*
+
+El purgado derivado del lookback elimina el solape de ventanas entre entrenamiento
+y test. No elimina que quien diseña las estrategias ya ha visto la historia de
+BTC: sabe que 2018 y 2022 fueron bajistas y que 2020-21 fue alcista. Cualquier
+elección de familia de estrategias está condicionada por ese conocimiento previo, y
+ningún esquema de validación cruzada lo corrige.
+
+Mitigación parcial: el contador de trials incluye las estrategias descartadas, y el
+universo de la fase 3 se fija por familias clásicas documentadas en la literatura
+**antes** de mirar resultados, no por lo que parezca prometedor sobre la marcha.
