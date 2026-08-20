@@ -254,40 +254,156 @@ def probability_of_backtest_overfitting(
 
     edges = np.linspace(0, T, n_blocks + 1).astype(int)
     # Sumas por bloque: permiten reconstruir media y desviación de cualquier unión
-    # de bloques sin recorrer los datos otra vez.
+    # de bloques con un producto de matrices, sin recorrer los datos otra vez.
     s1 = np.stack([M[a:b].sum(axis=0) for a, b in zip(edges, edges[1:])])
     s2 = np.stack([(M[a:b] ** 2).sum(axis=0) for a, b in zip(edges, edges[1:])])
     cnt = np.array([b - a for a, b in zip(edges, edges[1:])], dtype=float)
 
-    def sharpe(mask: np.ndarray) -> np.ndarray:
-        n = cnt[mask].sum()
-        m = s1[mask].sum(axis=0) / n
-        var = s2[mask].sum(axis=0) / n - m**2
-        var = np.maximum(var * n / (n - 1), 0.0)
+    combos = np.array(list(combinations(range(n_blocks), n_blocks // 2)))
+    masks = np.zeros((len(combos), n_blocks), dtype=float)
+    np.put_along_axis(masks, combos, 1.0, axis=1)
+
+    def sharpes(w: np.ndarray) -> np.ndarray:
+        n = w @ cnt                              # (C,)
+        m = (w @ s1) / n[:, None]                # (C, N)
+        var = (w @ s2) / n[:, None] - m**2
+        var = np.maximum(var * (n / (n - 1.0))[:, None], 0.0)
         sd = np.sqrt(var)
-        return np.where(sd > 0, m / np.where(sd > 0, sd, 1.0), 0.0)
+        return np.divide(m, sd, out=np.zeros_like(m), where=sd > 0)
 
-    logits, oos_of_best = [], []
-    todos = np.arange(n_blocks)
-    for combo in combinations(range(n_blocks), n_blocks // 2):
-        is_mask = np.zeros(n_blocks, dtype=bool)
-        is_mask[list(combo)] = True
-        sr_is = sharpe(is_mask)
-        sr_oos = sharpe(~is_mask)
+    sr_is = sharpes(masks)
+    sr_oos = sharpes(1.0 - masks)
 
-        mejor = int(np.argmax(sr_is))
-        # Rango relativo de la ganadora in-sample dentro del ranking out-of-sample.
-        rango = float(stats.rankdata(sr_oos)[mejor])
-        omega = rango / (N + 1.0)
-        omega = min(max(omega, 1e-12), 1 - 1e-12)
-        logits.append(np.log(omega / (1.0 - omega)))
-        oos_of_best.append(sr_oos[mejor] - np.median(sr_oos))
+    mejor = np.argmax(sr_is, axis=1)
+    valor = np.take_along_axis(sr_oos, mejor[:, None], axis=1)
+    # Rango medio (empates repartidos), igual que scipy.stats.rankdata.
+    menores = (sr_oos < valor).sum(axis=1)
+    iguales = (sr_oos == valor).sum(axis=1)
+    rango = menores + (iguales + 1.0) / 2.0
 
-    logits = np.asarray(logits)
+    omega = np.clip(rango / (N + 1.0), 1e-12, 1 - 1e-12)
+    logits = np.log(omega / (1.0 - omega))
+    oos_of_best = valor.ravel() - np.median(sr_oos, axis=1)
+
+    # El logit vale EXACTAMENTE 0 cuando la ganadora in-sample cae justo en la
+    # mediana out-of-sample, cosa que con N impar ocurre en 1 de cada N casos.
+    # Contar ese átomo entero como sobreajuste sesga el PBO al alza (+0,04 con
+    # N=25); ignorarlo lo sesga a la baja en lo mismo. Se reparte a la mitad, que
+    # es lo único que deja el estimador centrado en 0,50 bajo la nula.
+    empate = np.isclose(logits, 0.0)
+
     return PBOResult(
-        pbo=float((logits <= 0).mean()),
+        pbo=float(((logits < 0) & ~empate).mean() + 0.5 * empate.mean()),
         n_combinations=len(logits),
         n_configs=N,
         logits=logits,
         median_oos_of_is_best=float(np.median(oos_of_best)),
     )
+
+
+def pbo_null_distribution(
+    n_obs: int,
+    n_configs: int,
+    n_blocks: int = 16,
+    n_sims: int = 300,
+    seed: int | None = None,
+) -> np.ndarray:
+    """PBO de `n_sims` conjuntos de configuraciones SIN ninguna habilidad.
+
+    Existe porque el PBO calculado sobre una sola matriz de resultados es muy
+    ruidoso: bajo la nula su media es 0,50 pero su desviación típica ronda 0,20.
+    Un PBO observado de 0,20 no demuestra que no haya sobreajuste; puede ser una
+    fluctuación de un conjunto sin ninguna señal.
+    """
+    rng = np.random.default_rng(config.SEED if seed is None else seed)
+    return np.array(
+        [
+            probability_of_backtest_overfitting(
+                rng.normal(0.0, 0.02, (n_obs, n_configs)), n_blocks=n_blocks
+            ).pbo
+            for _ in range(n_sims)
+        ]
+    )
+
+
+def pbo_pvalue(
+    observed_pbo: float,
+    n_obs: int,
+    n_configs: int,
+    n_blocks: int = 16,
+    n_sims: int = 300,
+    seed: int | None = None,
+) -> float:
+    """Probabilidad de obtener un PBO tan bajo como el observado sin habilidad.
+
+    Es el complemento honesto de C6: un PBO bajo con p-valor alto no es evidencia
+    de nada.
+    """
+    nula = pbo_null_distribution(n_obs, n_configs, n_blocks, n_sims, seed)
+    return float((nula <= observed_pbo).mean())
+
+
+# ---------------------------------------------------------------------------
+# Calibración: qué significan de verdad un DSR y un PBO
+# ---------------------------------------------------------------------------
+def mean_pairwise_correlation(matrix: np.ndarray) -> float:
+    """Correlación media entre columnas. Los intentos de una misma familia de
+    estrategias están muy correlacionados entre sí, y eso cambia la distribución
+    nula tanto del DSR como del PBO."""
+    M = np.asarray(matrix, dtype=float)
+    if M.shape[1] < 2:
+        return 0.0
+    c = np.corrcoef(M, rowvar=False)
+    iu = np.triu_indices_from(c, k=1)
+    return float(np.nanmean(c[iu]))
+
+
+def _null_trial_matrix(rng, n_obs: int, n_configs: int, rho: float) -> np.ndarray:
+    """Intentos SIN habilidad con correlación media `rho` entre ellos."""
+    rho = float(np.clip(rho, 0.0, 0.999))
+    comun = rng.normal(0.0, 0.02, (n_obs, 1))
+    propio = rng.normal(0.0, 0.02, (n_obs, n_configs))
+    return np.sqrt(rho) * comun + np.sqrt(1.0 - rho) * propio
+
+
+def dsr_null_distribution(
+    n_obs: int,
+    n_configs: int,
+    rho: float = 0.0,
+    n_sims: int = 500,
+    seed: int | None = None,
+) -> np.ndarray:
+    """DSR de la MEJOR de `n_configs` estrategias sin habilidad.
+
+    Existe porque el DSR **no** es uniforme en [0, 1] bajo la nula: está
+    concentrado alrededor de 0,5 (ver `tests/test_statistics.py`). Por tanto
+    "DSR ≥ 0,95" NO significa "95 % de confianza"; hay que traducirlo a un
+    p-valor empírico con la misma `n_configs`, la misma longitud y la misma
+    correlación entre intentos que el experimento real.
+    """
+    rng = np.random.default_rng(config.SEED if seed is None else seed)
+    out = np.empty(n_sims)
+    for i in range(n_sims):
+        M = _null_trial_matrix(rng, n_obs, n_configs, rho)
+        sd = M.std(axis=0, ddof=1)
+        sr = np.divide(M.mean(axis=0), sd, out=np.zeros(n_configs), where=sd > 0)
+        mejor = int(np.argmax(sr))
+        out[i] = deflated_sharpe_ratio(M[:, mejor], n_configs, float(np.var(sr, ddof=1)))
+    return out
+
+
+def dsr_pvalue(
+    observed_dsr: float,
+    n_obs: int,
+    n_configs: int,
+    rho: float = 0.0,
+    n_sims: int = 500,
+    seed: int | None = None,
+) -> float:
+    """Probabilidad de alcanzar un DSR así de alto sin ninguna habilidad.
+
+    Es lo que hay que reportar junto al DSR. El umbral nominal de 0,95 no está
+    calibrado; este p-valor sí.
+    """
+    nula = dsr_null_distribution(n_obs, n_configs, rho, n_sims, seed)
+    return float((nula >= observed_dsr).mean())

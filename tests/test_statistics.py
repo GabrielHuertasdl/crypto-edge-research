@@ -180,3 +180,118 @@ def test_pbo_rechaza_configuraciones_absurdas():
         st.probability_of_backtest_overfitting(rng.normal(0, 1, (100, 5)), n_blocks=7)
     with pytest.raises(ValueError):
         st.probability_of_backtest_overfitting(rng.normal(0, 1, (10, 5)), n_blocks=8)
+
+
+# ---------------------------------------------------------------------------
+# Calibración bajo la nula: lo que estos estadísticos significan de verdad
+# ---------------------------------------------------------------------------
+def test_pbo_esta_centrado_en_050_bajo_la_nula():
+    """Exigido explícitamente: sin ninguna habilidad, el CSCV debe converger a
+    0,50. Se promedia sobre matrices independientes porque el PBO de UNA sola
+    matriz es muy ruidoso (ver el test siguiente)."""
+    rng = np.random.default_rng(31)
+    pbos = [
+        st.probability_of_backtest_overfitting(rng.normal(0, 0.02, (800, 25)), n_blocks=8).pbo
+        for _ in range(120)
+    ]
+    assert 0.45 <= float(np.mean(pbos)) <= 0.55, float(np.mean(pbos))
+
+
+@pytest.mark.parametrize("n_blocks", [8, 10])
+def test_pbo_centrado_para_varios_tamanos_de_particion(n_blocks):
+    rng = np.random.default_rng(32 + n_blocks)
+    pbos = [
+        st.probability_of_backtest_overfitting(
+            rng.normal(0, 0.02, (800, 20)), n_blocks=n_blocks
+        ).pbo
+        for _ in range(100)
+    ]
+    assert 0.45 <= float(np.mean(pbos)) <= 0.55, float(np.mean(pbos))
+
+
+def test_el_empate_exacto_en_la_mediana_se_reparte():
+    """Con N impar el logit vale exactamente 0 en 1 de cada N casos. Contarlo
+    entero como sobreajuste sesga el PBO +0,04; ignorarlo lo sesga −0,04."""
+    rng = np.random.default_rng(33)
+    pbos = [
+        st.probability_of_backtest_overfitting(rng.normal(0, 0.02, (600, 25)), n_blocks=8).pbo
+        for _ in range(120)
+    ]
+    assert abs(float(np.mean(pbos)) - 0.50) < 0.05
+
+
+def test_pbo_de_una_sola_matriz_es_muy_ruidoso():
+    """Motivo de que C6 necesite p-valor: la desviación típica del PBO bajo la
+    nula ronda 0,20, así que un PBO observado de 0,20 puede ser puro azar."""
+    rng = np.random.default_rng(34)
+    pbos = np.array(
+        [
+            st.probability_of_backtest_overfitting(rng.normal(0, 0.02, (800, 25)), n_blocks=8).pbo
+            for _ in range(120)
+        ]
+    )
+    assert pbos.std() > 0.12
+    assert (pbos <= 0.20).mean() > 0.03      # falsos positivos nada despreciables
+
+
+def test_pvalue_del_pbo_distingue_azar_de_senal():
+    rng = np.random.default_rng(35)
+    M = rng.normal(0, 0.02, (800, 20))
+    p_ruido = st.pbo_pvalue(
+        st.probability_of_backtest_overfitting(M, n_blocks=8).pbo, 800, 20, 8, n_sims=60, seed=1
+    )
+    M[:, 0] += 0.004
+    p_senal = st.pbo_pvalue(
+        st.probability_of_backtest_overfitting(M, n_blocks=8).pbo, 800, 20, 8, n_sims=60, seed=1
+    )
+    assert p_senal < p_ruido
+
+
+def test_dsr_esta_centrado_pero_NO_es_uniforme_bajo_la_nula():
+    """Resultado incómodo y deliberadamente fijado en un test.
+
+    El DSR de la mejor de N estrategias sin habilidad tiene media ≈ 0,5, pero su
+    distribución está CONCENTRADA alrededor de 0,5, no es uniforme: un
+    Kolmogorov-Smirnov contra U(0,1) la rechaza con holgura.
+
+    Consecuencia directa: "DSR ≥ 0,95" NO significa "95 % de confianza". En el
+    caso de intentos independientes es mucho más estricto que eso, y lo que hay
+    que reportar es el p-valor empírico de `dsr_pvalue`.
+    """
+    from scipy import stats as sps
+
+    d = st.dsr_null_distribution(n_obs=1095, n_configs=100, rho=0.0, n_sims=400, seed=36)
+    assert 0.42 < d.mean() < 0.58, d.mean()
+
+    ks = sps.kstest(d, "uniform")
+    assert ks.pvalue < 1e-6, f"KS no rechaza uniformidad: D={ks.statistic:.3f}"
+    assert d.std() < 0.28                     # infradispersa frente a U(0,1) (sd 0,289)
+    assert (d >= 0.95).mean() < 0.02          # el 0,95 nominal no es un 5 %
+
+
+def test_la_correlacion_entre_intentos_cambia_la_nula_del_dsr():
+    """Intentos de una misma familia están correlacionados, y eso hace el umbral
+    nominal más permisivo. Por eso el p-valor se simula con la rho observada."""
+    indep = st.dsr_null_distribution(1095, 100, rho=0.0, n_sims=250, seed=37)
+    corr = st.dsr_null_distribution(1095, 100, rho=0.6, n_sims=250, seed=37)
+    assert (corr >= 0.95).mean() > (indep >= 0.95).mean()
+
+
+def test_pvalue_del_dsr_es_pequeno_solo_con_habilidad_real():
+    rng = np.random.default_rng(38)
+    v = st.annualized_sr_variance_to_periodic(0.4)
+    ruido = st.deflated_sharpe_ratio(rng.normal(0.0, 0.02, 1095), 100, v)
+    bueno = st.deflated_sharpe_ratio(rng.normal(0.003, 0.02, 1095), 100, v)
+    p_ruido = st.dsr_pvalue(ruido, 1095, 100, n_sims=200, seed=39)
+    p_bueno = st.dsr_pvalue(bueno, 1095, 100, n_sims=200, seed=39)
+    assert p_bueno < p_ruido
+    assert p_bueno < 0.05
+
+
+def test_correlacion_media_entre_columnas():
+    rng = np.random.default_rng(40)
+    indep = rng.normal(0, 1, (2000, 10))
+    assert abs(st.mean_pairwise_correlation(indep)) < 0.1
+    comun = rng.normal(0, 1, (2000, 1))
+    juntas = np.sqrt(0.7) * comun + np.sqrt(0.3) * rng.normal(0, 1, (2000, 10))
+    assert abs(st.mean_pairwise_correlation(juntas) - 0.7) < 0.1

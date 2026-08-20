@@ -220,3 +220,116 @@ Coste medido sobre el TRAIN de BTC (1.992 días): lookback 200 con calentamiento
 200 consume el 31,4 %; con calentamiento 400 llega al 42,2 % y queda **inviable**.
 Las estrategias de tendencia muy lenta pueden no ser evaluables en este proyecto,
 y eso es un resultado, no un fallo.
+
+---
+
+# Enmienda 2 — 2026-08-20
+
+**También anterior al primer backtest de una estrategia** (`results/trials_log.csv`
+sigue sin existir en el commit que la introduce). Los cuatro cambios endurecen o
+declaran de antemano un fracaso previsible. Ninguno relaja nada.
+
+## E2.1 · El PBO está centrado, pero un PBO suelto no dice nada
+
+Simulación bajo la nula (matrices de intentos sin ninguna habilidad, 100-150
+réplicas por celda, S ∈ {8, 10, 16}, N ∈ {10, 25, 50}):
+
+| | media | desv. típica | P(PBO ≤ 0,20 \| nula) |
+|---|---:|---:|---:|
+| S=8, N=25 | 0,479 | 0,202 | 10,7 % |
+| S=10, N=25 | 0,490 | 0,207 | 9,3 % |
+| S=16, N=50 | 0,511 | 0,169 | 3,3 % |
+
+El estimador **está centrado en 0,50**, como debe. El 36 % que se reportó antes
+sobre "ruido puro" era **una sola matriz**, no un promedio: con una desviación
+típica de 0,20, una realización cualquiera cae fácilmente en 0,36. Corregido
+también un sesgo menor de ±0,04 en el tratamiento de los empates exactos en la
+mediana (con N impar el logit vale exactamente 0 en 1 de cada N casos; ahora se
+reparte a la mitad).
+
+Lo que sí queda demostrado es que **C6 por sí solo es débil**: una familia de
+estrategias sin ninguna ventaja saca PBO ≤ 0,20 entre el 3 % y el 13 % de las
+veces, del mismo orden que la tasa de falso positivo de C1.
+
+**C6 (nuevo enunciado):** PBO ≤ 0,20 **y** `statistics.pbo_pvalue` ≤ 0,10, con la
+nula simulada con la misma longitud, el mismo número de configuraciones y el mismo
+número de bloques. Ambas condiciones son necesarias.
+
+## E2.2 · El DSR NO es uniforme bajo la nula: 0,95 no es el 95 %
+
+Simulación: 1.500 réplicas, en cada una se eligen `N` estrategias sin habilidad,
+se toma la mejor por Sharpe y se calcula su DSR con la varianza observada de los
+Sharpes de los intentos.
+
+| Escenario | media | KS contra U(0,1) | P(DSR ≥ 0,95 \| nula) |
+|---|---:|---|---:|
+| N=20, intentos independientes | 0,496 | D=0,212, p≈1,6·10⁻⁵⁹ | 0,00 % |
+| N=100, independientes | 0,491 | D=0,235, p≈1,3·10⁻⁷³ | 0,07 % |
+| N=500, independientes | 0,495 | D=0,253, p≈3,5·10⁻⁸⁵ | 0,07 % |
+| N=100, ρ̄ = 0,6 | 0,509 | D=0,078, p≈2,3·10⁻⁸ | 2,07 % |
+
+**La media es correcta (≈ 0,50) pero la distribución está concentrada alrededor de
+0,5, no es uniforme.** El Kolmogorov-Smirnov rechaza la uniformidad con enorme
+holgura en los cuatro escenarios. La causa es que `SR_0` se calcula con la varianza
+*observada* de los Sharpes de los intentos, que es justo la que determina el
+máximo: numerador y umbral se mueven juntos y la diferencia se comprime.
+
+Consecuencias, escritas antes de ver ningún resultado:
+
+1. **"DSR ≥ 0,95" no significa "95 % de confianza".** Con intentos independientes
+   es mucho **más** estricto (falso positivo < 0,1 %); con intentos correlacionados
+   —que es el caso real, porque las configuraciones de una misma familia se parecen
+   mucho— se relaja hasta ~2 %. El umbral nominal no está calibrado.
+2. **C5 (nuevo enunciado):** DSR ≥ 0,95 **y** `statistics.dsr_pvalue` ≤ 0,05, con
+   la nula simulada usando `N`, la longitud real y la **correlación media observada
+   entre los intentos** (`statistics.mean_pairwise_correlation` sobre la matriz de
+   retornos de las configuraciones). El p-valor manda sobre el umbral nominal.
+3. Es previsible que C5 sea el criterio más difícil de superar, y que su dificultad
+   dependa de cuán parecidas sean entre sí las configuraciones probadas. El informe
+   publicará ρ̄ junto al DSR.
+
+## E2.3 · Predicción registrada: C8c va a fallar
+
+Con `N = 4` activos, `N_eff = 4 / (1 + 3ρ̄) ≥ 2` exige **ρ̄ ≤ 0,333**.
+
+Las curvas de equity de una misma estrategia sobre BTC, ETH, SOL y LTC van a
+correlacionar muy por encima de 0,333: los cuatro comparten factor de mercado y la
+estrategia responde a él de la misma forma en todos. **Se deja escrito ahora que lo
+esperable es `N_eff` entre 1 y 1,5**, es decir, que C8c falle.
+
+Eso **no** invalida C8a ni C8b, que siguen siendo exigibles. Lo que hace es fijar
+de antemano cómo se redacta el resultado: si C8c falla, el informe dirá
+literalmente **"validada en ~1 activo efectivo, replicada en cuatro
+correlacionados"**, y la estabilidad cross-asset no se contará como evidencia
+independiente en el veredicto. Registrarlo ahora impide presentarlo después como
+un matiz técnico menor.
+
+## E2.4 · La validación fuera de cripto pasa a conjunto de datos primario
+
+La tabla de viabilidad del CPCV (E1.5) tiene una consecuencia que no se había
+extraído: con lookback 200 y calentamiento 400 el purgado se come el 42,2 % de
+TRAIN y la configuración es **inviable**. Es decir, **el seguimiento de tendencia
+lento —la familia con mejor evidencia documentada fuera de muestra, décadas de
+ella en futuros gestionados— queda excluido por longitud de datos**.
+
+Lo que queda viable es justo el conjunto complementario: familias de horizonte
+corto, con evidencia previa más débil, más operaciones y por tanto **mucha mayor
+sensibilidad a los costes**. Dejarlo así sesgaría el proyecto entero hacia las
+estrategias con menos probabilidad *a priori* de tener ventaja real.
+
+Por tanto:
+
+- Para toda estrategia con `lookback ≥ 100` o `warmup ≥ 200`, **oro (`GC=F`),
+  S&P 500 (`^GSPC`), EURUSD y USDJPY dejan de ser un test final y pasan a ser
+  conjunto de datos primario**, con su propio TRAIN/VALIDATION/LOCKBOX.
+- Esa infraestructura se monta en la **fase 3**, no al final.
+- Los parámetros se ajustan en el TRAIN de cripto y se aplican **sin reoptimizar**
+  fuera de cripto. La dirección no se invierte nunca: no se ajusta en oro para
+  aplicar en BTC.
+- Esos mercados aportan lo que a cripto le falta: décadas de historia y regímenes
+  de verdad independientes. Un lookback de 200 días sobre el S&P desde 1990 tiene
+  ~8.500 sesiones y varios ciclos completos; sobre BTC tiene 1.992 días y tres.
+- Contrapartida declarada: el oro, el S&P y las divisas **no son el activo que se
+  quiere operar**. Que una estrategia funcione ahí es evidencia de que la familia
+  no es un artefacto, no de que vaya a funcionar en cripto. El informe mantendrá
+  las dos cosas separadas.
