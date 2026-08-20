@@ -158,6 +158,30 @@ EXTERNAL_REQUIRED_WARMUP = 200
 # integridad los tratan aparte.
 EXTERNAL_TRADING_DAYS_PER_YEAR = 252
 
+# Coste por rotación, POR MERCADO. `COST_PER_TURN` (0,15 %) está calibrado para
+# cripto en un exchange minorista y penalizaría injustamente al S&P, donde operar
+# es uno o dos órdenes de magnitud más barato. Cada cifra es comisión + horquilla
+# típica por lado, para un participante minorista con instrumentos líquidos:
+#
+#   SP500   ETF SPY o futuro ES: comisión ~0 en brokers actuales, horquilla ~1 pb
+#   GOLD    futuro GC o ETF GLD: horquilla algo mayor, ~2-3 pb
+#   EURUSD  spot, horquilla de ~0,5-1 pip sobre 1,10 -> ~1 pb, más comisión
+#   USDJPY  igual que EURUSD
+#
+# Son estimaciones, no datos de ejecución. Por eso E2.4 reporta OBLIGATORIAMENTE
+# el análisis de sensibilidad al coste: si la conclusión cambia al moverlo, la
+# conclusión es que depende del coste.
+MARKET_COST_PER_TURN = {
+    "SP500": 0.0002,
+    "GOLD": 0.0003,
+    "EURUSD": 0.0002,
+    "USDJPY": 0.0002,
+}
+
+# Multiplicadores del análisis de sensibilidad. El 7,5x lleva EURUSD y S&P hasta
+# el coste de cripto, para ver el resultado con el listón más severo posible.
+COST_SENSITIVITY_MULTIPLIERS = (0.5, 1.0, 2.0, 5.0, 7.5)
+
 # Splits para los activos externos. `deep_oos` es todo lo anterior al TRAIN de
 # cripto: décadas que NINGÚN parámetro de este proyecto ha visto, porque los
 # parámetros se ajustan en el TRAIN de cripto y aquí se aplican sin reoptimizar.
