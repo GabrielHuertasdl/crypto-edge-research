@@ -70,6 +70,7 @@ def evaluate_out_of_block(
     params: dict,
     lag: int | None = None,
     periods_per_year: int | None = None,
+    cost_per_turn: float | None = None,
 ) -> tuple[bt.BacktestResult, list[pd.Series]]:
     """Retornos fuera de bloque sobre todo el índice de `prices`.
 
@@ -87,7 +88,7 @@ def evaluate_out_of_block(
         trozos.append(
             bt.run(
                 ventana, señal, lag=lag, score_from=bloque.test[0],
-                periods_per_year=periods_per_year,
+                periods_per_year=periods_per_year, cost_per_turn=cost_per_turn,
             )
         )
     vivos = [t for t in trozos if t is not None]
