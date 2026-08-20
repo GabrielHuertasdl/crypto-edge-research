@@ -98,3 +98,22 @@ ningún esquema de validación cruzada lo corrige.
 Mitigación parcial: el contador de trials incluye las estrategias descartadas, y el
 universo de la fase 3 se fija por familias clásicas documentadas en la literatura
 **antes** de mirar resultados, no por lo que parezca prometedor sobre la marcha.
+
+## D8 · El Sharpe miente a volatilidades del 100 %
+*Fase 2, detectado al calcular el benchmark.*
+
+Buy & hold de LTC en VALIDATION (2021-2023): **Sharpe +0,24 y retorno total
+−47,0 %**. No es un bug del motor; es la brecha entre media aritmética y media
+geométrica. Con volatilidad anualizada del 92,8 % el lastre de varianza (σ²/2 ≈
+43 puntos al año) se come una rentabilidad media positiva y deja la curva de
+capital por debajo de la mitad.
+
+Consecuencia para los criterios pre-registrados: **C2 (batir al buy & hold en
+Sharpe) puede satisfacerse batiendo a un desastre**. En LTC el listón es un Sharpe
+de 0,24 mientras el activo pierde la mitad. Lo que impide que eso pase por ventaja
+es C1 (Sharpe ≥ 0,70 en absoluto) y, en el lockbox, L5 (retorno neto > 0).
+
+Los criterios están pre-registrados y **no se tocan**. Lo que sí se hace: el
+informe reporta siempre Sharpe **y** retorno total juntos, nunca el Sharpe solo, y
+señala explícitamente cualquier finalista cuyo Sharpe positivo conviva con
+capital decreciente.
