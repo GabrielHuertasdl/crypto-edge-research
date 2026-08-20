@@ -223,3 +223,65 @@ def test_run_lag_variants_y_decay():
     assert set(res) == set(config.LAG_VARIANTS)
     assert res[2].lag == 2
     assert not np.isnan(bt.lag_decay(res))
+
+
+# ---------------------------------------------------------------------------
+# Calentamiento y reinicio de estado (bloques de test del CPCV)
+# ---------------------------------------------------------------------------
+def test_score_from_excluye_el_calentamiento_de_las_metricas():
+    p = mk([100] * 4 + [110, 121, 133.1])
+    res = bt.run(p, sig([1] * 7, p), lag=2, score_from=p.index[4])
+    assert res.metrics["n_days"] == 3
+    assert res.equity.index[0] == p.index[4]
+    # La curva parte de 1,0 el día ANTERIOR al primero puntuado, así que el
+    # primer valor ya incorpora el retorno de ese día (+10 %) y ningún coste:
+    # la posición venía puesta del calentamiento.
+    np.testing.assert_allclose(res.equity.iloc[0], 1.10)
+    np.testing.assert_allclose(res.equity.iloc[-1], 1.10 * 1.10 * 1.10)
+
+
+def test_score_from_no_inventa_un_coste_de_entrada():
+    """La posición ya venía puesta del calentamiento: al empezar a puntuar no hay
+    rotación, así que no hay coste. Si lo hubiera, todo bloque de test empezaría
+    pagando una entrada que en realidad ocurrió antes."""
+    p = mk([100] * 10)
+    completo = bt.run(p, sig([1] * 10, p), lag=2)
+    puntuado = bt.run(p, sig([1] * 10, p), lag=2, score_from=p.index[5])
+    assert completo.metrics["total_return"] < 0        # pagó la entrada
+    np.testing.assert_allclose(puntuado.metrics["total_return"], 0.0, atol=1e-15)
+
+
+def test_score_from_conserva_la_posicion_heredada():
+    p = mk([100] * 8)
+    res = bt.run(p, sig([1] * 8, p), lag=2, score_from=p.index[5])
+    assert res.position.iloc[0] == 1.0
+    assert res.metrics["exposure"] == 1.0
+
+
+def test_score_from_vacio_se_rechaza():
+    p = mk([100, 101, 102])
+    with pytest.raises(ValueError, match="ventana vacía"):
+        bt.run(p, sig([1, 1, 1], p), lag=2, score_from=pd.Timestamp("2030-01-01", tz="UTC"))
+
+
+def test_reinicio_de_estado_cambia_el_resultado_de_una_estrategia_con_memoria():
+    """Motivo del calentamiento: una ruptura de Donchian arrastra posición mucho
+    más allá de su lookback. Arrancar el bloque desde cero NO da lo mismo que
+    heredar la posición, y por eso el estado se reinicia."""
+    from src import indicators as ind
+
+    rng = np.random.default_rng(21)
+    precios = mk(100 * np.cumprod(1 + rng.normal(0.0015, 0.02, 600)))
+
+    def señal(df):
+        canal = ind.donchian(df, 55)
+        cruce = pd.Series(np.nan, index=df.index)
+        cruce[df["close"] > canal["upper"]] = 1.0
+        cruce[df["close"] < canal["lower"]] = 0.0
+        return cruce.ffill().fillna(0.0)
+
+    corte = precios.index[400]
+    heredado = bt.run(precios, señal(precios), lag=2, score_from=corte)
+    reiniciado = bt.run(precios.loc[corte:], señal(precios.loc[corte:]), lag=2)
+
+    assert heredado.metrics["total_return"] != reiniciado.metrics["total_return"]

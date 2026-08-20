@@ -151,3 +151,74 @@ def test_rechaza_configuracion_absurda():
         v.cpcv_splits(idx(1000), max_lookback=10, n_groups=1, n_test_groups=1)
     with pytest.raises(ValueError):
         v.cpcv_splits(idx(5), max_lookback=10, n_groups=10, n_test_groups=2)
+
+
+# ---------------------------------------------------------------------------
+# Calentamiento y reinicio de estado
+# ---------------------------------------------------------------------------
+def test_cada_bloque_trae_su_calentamiento():
+    splits = v.cpcv_splits(idx(2000), max_lookback=50, warmup=120)
+    s = next(x for x in splits if x.test_groups == (4, 6))
+    assert len(s.blocks) == 2
+    for b in s.blocks:
+        assert len(b.warmup) == 120
+        assert b.warmup[-1] < b.test[0]
+        assert len(b.test) > 0
+
+
+def test_grupos_adyacentes_forman_un_solo_bloque():
+    """Con grupos contiguos el test es un solo tramo, no dos bloques."""
+    splits = v.cpcv_splits(idx(2000), max_lookback=50, warmup=60)
+    s = next(x for x in splits if x.test_groups == (3, 4))
+    assert len(s.blocks) == 1
+    assert len(s.blocks[0].test) == 400
+
+
+def test_el_calentamiento_nunca_esta_en_el_entrenamiento():
+    """Si los días de calentamiento estuvieran además en el entrenamiento, el
+    estado con el que arranca el test vendría de datos ya vistos."""
+    splits = v.cpcv_splits(idx(2000), max_lookback=50, warmup=150)
+    for s in splits:
+        for b in s.blocks:
+            assert len(s.train.intersection(b.warmup)) == 0
+
+
+def test_purgado_previo_cubre_el_calentamiento():
+    """El purgado por etiqueta son 2 días; el calentamiento son 300. El purgado
+    previo debe estirarse hasta cubrir el mayor de los dos."""
+    assert v.purge_spans(max_lookback=50, n_samples=2000).before == 2
+    index = idx(2000)
+    splits = v.cpcv_splits(index, max_lookback=50, warmup=300)
+    combo = next(x for x in splits if x.test_groups == (5, 7))
+    previos = index[index < combo.blocks[0].test[0]][-300:]
+    assert len(combo.train.intersection(previos)) == 0
+
+
+def test_bloque_pegado_al_inicio_gasta_test_en_calentarse():
+    """Sin datos delante, el calentamiento sale del propio bloque y esos días no
+    se puntúan. Puntuarlos sería medir la estrategia con los indicadores en NaN."""
+    index = idx(2000)
+    splits = v.cpcv_splits(index, max_lookback=50, warmup=120)
+    # (0, 5): el grupo 0 va suelto, así que su bloque son sus 200 días justos.
+    primero = next(x for x in splits if x.test_groups == (0, 5))
+    b = primero.blocks[0]
+    assert b.warmup[0] == index[0]
+    assert len(b.warmup) == 120
+    assert len(b.test) == 200 - 120
+
+
+def test_fraccion_puntuada_baja_al_subir_el_calentamiento():
+    index = idx(2000)
+    fracs = [
+        v.scored_fraction(v.cpcv_splits(index, max_lookback=50, warmup=w), 2000)
+        for w in (20, 150, 400)
+    ]
+    assert fracs[0] > fracs[1] > fracs[2]
+
+
+def test_calentamiento_largo_puede_hacer_inviable_la_configuracion():
+    """Resultado que hay que reportar, no esconder: una estrategia de tendencia
+    lenta con posiciones largas puede no ser validable con este TRAIN."""
+    index = idx(1992)   # TRAIN de BTC
+    assert v.is_feasible(v.cpcv_splits(index, max_lookback=200, warmup=200), 1992)
+    assert not v.is_feasible(v.cpcv_splits(index, max_lookback=200, warmup=400), 1992)
