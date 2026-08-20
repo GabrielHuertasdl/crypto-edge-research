@@ -114,12 +114,37 @@ def cpcv_paths(
 # Splits
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
+class TestBlock:
+    """Un tramo contiguo de test con su calentamiento delante.
+
+    El calentamiento existe porque el purgado por lookback NO basta para las
+    estrategias con estado. Una ruptura de Donchian abre posición y la mantiene
+    meses: mucho más que su ventana de 55 días. Si el bloque de test empieza con
+    la posición heredada de lo que pasó en el entrenamiento, los primeros meses de
+    ese bloque no miden la estrategia, miden el entrenamiento.
+
+    Solución: al entrar en cada bloque el estado se reinicia a plano y se
+    reconstruye usando **solo** los `warmup` días previos, que están purgados del
+    entrenamiento precisamente para poder usarlos aquí. Se puntúa `test`, nunca
+    `warmup`.
+    """
+
+    warmup: pd.DatetimeIndex
+    test: pd.DatetimeIndex
+
+    @property
+    def full(self) -> pd.DatetimeIndex:
+        return self.warmup.append(self.test)
+
+
+@dataclass(frozen=True)
 class CPCVSplit:
     combo: int
     test_groups: tuple[int, ...]
     train: pd.DatetimeIndex
     test: pd.DatetimeIndex
     n_purged: int
+    blocks: tuple[TestBlock, ...] = ()
 
 
 def group_bounds(n_samples: int, n_groups: int) -> list[tuple[int, int]]:
@@ -137,11 +162,18 @@ def cpcv_splits(
     label_horizon: int = 1,
     lag: int | None = None,
     embargo_pct: float | None = None,
+    warmup: int | None = None,
 ) -> list[CPCVSplit]:
     """Combinatorial Purged Cross-Validation sobre un índice temporal.
 
     `max_lookback` es la ventana más larga que usa la estrategia. Se pasa por
     estrategia; no hay un valor por defecto a propósito.
+
+    `warmup` es el estado que la estrategia necesita reconstruir al entrar en un
+    bloque de test. Por defecto `max_lookback`, pero una estrategia con posiciones
+    largas debe declarar más (ver `strategies.StrategySpec.warmup`). El purgado
+    previo se amplía hasta cubrirlo: esos días alimentan el calentamiento del test
+    y por tanto no pueden estar además en el entrenamiento.
     """
     N = config.CPCV_N_GROUPS if n_groups is None else n_groups
     k = config.CPCV_N_TEST_GROUPS if n_test_groups is None else n_test_groups
@@ -151,7 +183,11 @@ def cpcv_splits(
     if n < N:
         raise ValueError(f"{n} observaciones no dan para {N} grupos")
 
+    warmup = int(max_lookback if warmup is None else warmup)
     spans = purge_spans(max_lookback, n, label_horizon, lag, embargo_pct)
+    # El purgado previo cubre lo que sea mayor: el horizonte de la etiqueta o el
+    # calentamiento que el bloque de test va a consumir.
+    span_before = max(spans.before, warmup)
     bounds = group_bounds(n, N)
     positions = np.arange(n)
 
@@ -162,12 +198,24 @@ def cpcv_splits(
             lo, hi = bounds[g]
             test_mask[lo:hi] = True
 
+        # Tramos contiguos de test: dos grupos adyacentes forman un solo bloque.
+        padded = np.concatenate(([False], test_mask, [False]))
+        inicios = np.flatnonzero(~padded[:-1] & padded[1:])
+        finales = np.flatnonzero(padded[:-1] & ~padded[1:])
+
         excluded = test_mask.copy()
-        # Purgado alrededor de cada bloque contiguo de test.
-        for g in combo:
-            lo, hi = bounds[g]
-            excluded[max(0, lo - spans.before):lo] = True
+        blocks = []
+        for lo, hi in zip(inicios, finales):
+            w_lo = max(0, lo - warmup)
+            # Si delante del bloque no hay `warmup` días (bloque pegado al inicio
+            # de la muestra), el calentamiento se toma del propio bloque y esos
+            # días NO se puntúan. Puntuarlos sería medir la estrategia mientras
+            # sus indicadores todavía son NaN.
+            falta = warmup - (lo - w_lo)
+            t_lo = min(lo + falta, hi)
+            excluded[max(0, lo - span_before):lo] = True
             excluded[hi:min(n, hi + spans.total_after)] = True
+            blocks.append(TestBlock(warmup=index[w_lo:t_lo], test=index[t_lo:hi]))
 
         train = positions[~excluded]
         test = positions[test_mask]
@@ -178,9 +226,17 @@ def cpcv_splits(
                 train=index[train],
                 test=index[test],
                 n_purged=int(excluded.sum() - test_mask.sum()),
+                blocks=tuple(blocks),
             )
         )
     return splits
+
+
+def scored_fraction(splits: list[CPCVSplit], n_samples: int) -> float:
+    """Fracción de la muestra que llega a puntuarse, ya descontado el
+    calentamiento consumido dentro de los bloques pegados al inicio."""
+    puntuados = [sum(len(b.test) for b in s.blocks) for s in splits]
+    return float(np.mean(puntuados) / n_samples)
 
 
 def purged_fraction(splits: list[CPCVSplit], n_samples: int) -> float:

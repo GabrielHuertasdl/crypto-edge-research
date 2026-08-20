@@ -25,7 +25,8 @@ Las reglas metodológicas están en [`CLAUDE.md`](CLAUDE.md) y son innegociables
 | LOCKBOX | 2024-hoy — **una sola ejecución, al final** |
 | Benchmark | Buy & hold, mismos costes |
 | Contra el overfitting | CPCV N=10/k=2 (**9 caminos**), purgado derivado del lookback, DSR, PBO, block bootstrap |
-| Pre-registro | `CRITERIOS_DE_ACEPTACION.md`, escrito antes del primer backtest |
+| Pre-registro | `CRITERIOS_DE_ACEPTACION.md` + Enmienda 1, ambos antes del primer backtest |
+| Sharpe | siempre con IC 95 % por block bootstrap; IC que incluye 0 = NO CONCLUYENTE |
 
 ## Instalación
 
@@ -46,7 +47,8 @@ src/indicators.py  indicadores, todos causales
 src/backtest.py    motor vectorizado + métricas
 src/strategies.py  universo de estrategias, cada una con su tesis económica
 src/validation.py  CPCV purgado, robustez, subperiodos, block bootstrap
-src/statistics.py  Deflated Sharpe, PBO, registro de configuraciones probadas
+src/statistics.py  block bootstrap, IC del Sharpe, Deflated Sharpe, PBO
+src/trial_registry.py registro append-only de configuraciones evaluadas
 lockbox/           evaluación final aislada — ver su README antes de tocarlo
 results/           métricas, gráficos, INFORME.md
 tests/             motor, lookahead, costes
@@ -56,7 +58,7 @@ tests/             motor, lookahead, costes
 
 - [x] **Fase 0** — Setup: estructura, entorno, reglas, guardia del lockbox
 - [x] **Fase 1** — Datos: descarga, caché, validación de integridad
-- [x] **Fase 2** — Motor de backtest + indicadores + CPCV, 138 tests en verde
+- [x] **Fase 2** — Motor + indicadores + CPCV purgado + estadística, 168 tests en verde
 - [ ] **Fase 3** — Universo de 15-25 estrategias con tesis económica
 - [ ] **Fase 4** — CPCV purgado, robustez, DSR y PBO
 - [ ] **Fase 5** — Lockbox (una sola vez)

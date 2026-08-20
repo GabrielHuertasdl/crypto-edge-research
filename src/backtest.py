@@ -91,11 +91,22 @@ def run(
     signal: pd.Series,
     lag: int | None = None,
     cost_per_turn: float | None = None,
+    score_from: pd.Timestamp | None = None,
 ) -> BacktestResult:
     """Ejecuta una señal sobre una serie de precios.
 
     `signal[t]` es la exposición deseada decidida con datos hasta el cierre de `t`.
     El motor se encarga del retardo; las estrategias NUNCA desplazan por su cuenta.
+
+    `score_from` separa **calentamiento** de **evaluación**: los días anteriores se
+    simulan igual (para que los indicadores y la posición lleguen al primer día
+    evaluado con el estado que les corresponde) pero no cuentan en las métricas.
+    Sirve para los bloques de test del CPCV, donde la posición al entrar en el
+    bloque no puede heredarse del entrenamiento.
+
+    La rotación del primer día evaluado se mide contra la posición del día
+    anterior, que existe en el calentamiento: así no aparece un coste de entrada
+    ficticio por el mero hecho de empezar a puntuar ahí.
     """
     lag = config.OFFICIAL_LAG if lag is None else lag
     cost_per_turn = config.COST_PER_TURN if cost_per_turn is None else cost_per_turn
@@ -111,6 +122,15 @@ def run(
     costs = turnover * cost_per_turn
     returns = position * r - costs
     equity = (1.0 + returns).cumprod()
+
+    if score_from is not None:
+        ventana = prices.index >= pd.Timestamp(score_from)
+        if not ventana.any():
+            raise ValueError(f"score_from={score_from} deja la ventana vacía")
+        returns = returns[ventana]
+        position = position[ventana]
+        turnover = turnover[ventana]
+        equity = (1.0 + returns).cumprod()
 
     trades = _extract_trades(position, returns, equity)
     metrics = _metrics(returns, equity, position, turnover, trades)

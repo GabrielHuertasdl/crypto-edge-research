@@ -104,3 +104,119 @@ de más de la mitad del Sharpe indica que VALIDATION ya estaba sobreajustado.
 3. Todo trial cuenta, incluidos los abandonados a media implementación.
 4. Cualquier bug encontrado en el motor después de haber generado resultados
    obliga a re-ejecutar y a documentar el cambio de cifras en el informe.
+
+---
+
+# Enmienda 1 — 2026-08-20
+
+**Anterior a la ejecución del primer backtest de una estrategia.** No hay ningún
+resultado que pueda haber motivado estos cambios: el registro de intentos
+(`results/trials_log.csv`) está vacío en el commit que introduce esta enmienda, y
+así puede comprobarse en el historial de git.
+
+Los cinco cambios **endurecen** los criterios o especifican lo que estaba
+ambiguo. Ninguno relaja nada.
+
+## E1.1 · Todos los Sharpe se reportan con intervalo de confianza
+
+Los umbrales de la sección 1 no tenían potencia estadística y hay que decirlo con
+números. El error estándar del Sharpe anualizado es ≈ `sqrt(365/T)`:
+
+| Muestra | T (días) | SE(Sharpe) | IC 95 % de un Sharpe puntual de 0,70 |
+|---|---:|---:|---|
+| TRAIN (BTC) | 1.992 | 0,43 | [−0,14, +1,54] |
+| VALIDATION | 1.095 | 0,58 | [−0,43, +1,83] |
+| LOCKBOX | 963 | 0,62 | [−0,51, +1,91] |
+| Un bloque CPCV (2 grupos) | 398 | 0,96 | [−1,18, +2,58] |
+
+Consecuencias que estaban ocultas en la versión original:
+
+- **C1 (≥ 0,70) tiene ~50 % de potencia** contra un Sharpe verdadero de 0,70. La
+  mitad de las estrategias que de verdad valen 0,70 lo suspenden.
+- **Una estrategia sin ninguna ventaja lo aprueba por azar el 5-13 %** de las
+  veces, según la muestra.
+- **L1 (> 0,50 en el lockbox) con SE 0,62 da un IC de [−0,71, +1,71]**: un
+  resultado compatible tanto con una buena estrategia como con nada.
+
+Por tanto:
+
+1. **Ningún Sharpe se reporta como punto.** Siempre `punto [IC 95 %]`, calculado
+   con el mismo stationary block bootstrap de C9
+   (`statistics.sharpe_confidence_interval`), que hereda la autocorrelación y la
+   curtosis de la serie en lugar de suponer normalidad. Se reporta además el SE
+   analítico de Lo (2002) como contraste.
+2. **Regla de interpretación, vinculante:** si el punto estimado supera el umbral
+   pero **el IC del 95 % incluye el cero**, el veredicto de ese criterio es
+   **NO CONCLUYENTE**, nunca "cumple". Una finalista con cualquier criterio en NO
+   CONCLUYENTE no puede declararse "con ventaja"; el veredicto global del proyecto
+   pasa a **NO CONCLUYENTE** en lugar de "hay ventaja".
+3. Esta regla se aplica igual en el lockbox. Dado el SE de 0,62, es previsible que
+   **cualquier** resultado del lockbox con Sharpe menor que ~1,2 caiga en NO
+   CONCLUYENTE. Queda escrito de antemano para que no se lea como decepción
+   posterior: es lo que la longitud de la muestra permite concluir.
+
+## E1.2 · C1 se mide sobre la mediana out-of-fold del CPCV
+
+Redacción anterior: "Sharpe neto anualizado ≥ 0,70". Ambigua sobre qué serie.
+
+**C1 (nuevo enunciado):** la **mediana** del Sharpe neto anualizado sobre los
+**9 caminos out-of-fold del CPCV** debe ser ≥ 0,70. Mediana y no media: con 9
+caminos, una media la mueve un solo camino afortunado.
+
+Se añade **C1b**: Sharpe neto anualizado en VALIDATION (pasada única, parámetros
+congelados en TRAIN) ≥ 0,70. C1 y C1b son ambos necesarios.
+
+Ambos con la regla de intervalos de E1.1.
+
+## E1.3 · C8 sube de umbral y añade evidencia efectiva
+
+Redacción anterior: "Sharpe neto > 0 en SOL y en LTC". Es casi vacío — son
+activos que subieron, y D4 explica por qué "funciona en 4 activos" está más cerca
+de "funciona en 1".
+
+**C8 (nuevo enunciado), las tres partes son necesarias:**
+
+- **C8a** — Sharpe neto ≥ **0,40** en SOL **y** en LTC (antes: > 0).
+- **C8b** — En SOL y en LTC la estrategia debe **batir al buy & hold de ese mismo
+  activo en Sharpe**. Sin esto, C8a se puede aprobar cobrando beta de mercado.
+- **C8c** — Se calcula la correlación media `ρ̄` entre las series de retornos
+  diarios de la estrategia en los cuatro activos, y el número efectivo de activos
+  independientes `N_eff = N / (1 + (N−1)·ρ̄)`. Si **`N_eff < 2`**, la estabilidad
+  cross-asset **no cuenta como evidencia independiente** y así se declara en el
+  informe: "validada en un activo efectivo, replicada en cuatro correlacionados".
+
+## E1.4 · Registro de intentos obligatorio
+
+`src/trial_registry.py`, append-only, persistido a disco **en el momento de cada
+evaluación**. Sin él, C5 (DSR) es decorativo: el DSR necesita `N` y `Var(SR)`
+reales, y un `N` reconstruido de memoria al final siempre sale corto.
+
+- Cuenta **toda** configuración evaluada: exploraciones, descartes y errores.
+- Las repeticiones se registran y quedan visibles, pero el `N` del DSR usa
+  configuraciones únicas.
+- El módulo no expone ninguna API de borrado.
+- El informe publica `n_trials`, `n_unique`, `n_repeats` y el desglose por
+  resultado.
+
+## E1.5 · Reinicio de estado y calentamiento en cada bloque de test
+
+El purgado derivado del lookback no basta para estrategias con estado: una ruptura
+de Donchian de 55 días puede mantener la posición meses, mucho más allá de su
+ventana. Si el bloque de test arranca con la posición heredada del entrenamiento,
+sus primeros meses miden el entrenamiento.
+
+- Cada `StrategySpec` declara `warmup(params)`, que **no** es su lookback.
+- Al entrar en cada bloque de test el estado se **reinicia a plano** y se
+  reconstruye usando solo los `warmup` días previos, que el purgado ya excluye del
+  entrenamiento.
+- Se puntúa únicamente el bloque de test (`backtest.run(..., score_from=)`).
+- Si delante del bloque no hay `warmup` días, el calentamiento sale del propio
+  bloque y esos días no se puntúan.
+- Si el purgado más el calentamiento superan el 40 % de TRAIN
+  (`validation.is_feasible`), la estrategia **no es validable con estos datos** y
+  el informe lo dice así, en lugar de publicar un número.
+
+Coste medido sobre el TRAIN de BTC (1.992 días): lookback 200 con calentamiento
+200 consume el 31,4 %; con calentamiento 400 llega al 42,2 % y queda **inviable**.
+Las estrategias de tendencia muy lenta pueden no ser evaluables en este proyecto,
+y eso es un resultado, no un fallo.

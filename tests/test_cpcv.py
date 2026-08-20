@@ -90,7 +90,11 @@ def test_purgado_elimina_exactamente_el_tramo_esperado():
     50-59) entre los de test: con lookback 7, lag 2 y embargo del 1 % (1 día),
     las posiciones 48-49 y 60-66 deben desaparecer del entrenamiento."""
     index = idx(100)
-    splits = v.cpcv_splits(index, max_lookback=7, n_groups=10, n_test_groups=2, embargo_pct=0.01)
+    # warmup=0 para aislar el purgado por etiqueta; con calentamiento el tramo
+    # previo se amplía y lo cubre el test siguiente.
+    splits = v.cpcv_splits(
+        index, max_lookback=7, n_groups=10, n_test_groups=2, embargo_pct=0.01, warmup=0
+    )
     # Se elige (0, 5): el grupo 0 está lejos y no solapa su purgado con el 5.
     s = next(x for x in splits if x.test_groups == (0, 5))
 
@@ -120,11 +124,12 @@ def test_lookback_desmesurado_se_marca_inviable():
 
 
 def test_sma200_sigue_siendo_viable_en_el_train_real():
-    """Comprobación de que la elección N=10 no ahoga a las estrategias lentas."""
+    """La elección N=10 no ahoga a una SMA de 200 con calentamiento equivalente,
+    pero el margen es estrecho: 31 % de TRAIN se va en purgado y calentamiento."""
     index = idx(1992)  # TRAIN de BTC
-    splits = v.cpcv_splits(index, max_lookback=200)
+    splits = v.cpcv_splits(index, max_lookback=200, warmup=200)
     assert v.is_feasible(splits, 1992)
-    assert v.purged_fraction(splits, 1992) < 0.25
+    assert 0.25 < v.purged_fraction(splits, 1992) < 0.35
 
 
 def test_grupos_contiguos_y_ordenados():
