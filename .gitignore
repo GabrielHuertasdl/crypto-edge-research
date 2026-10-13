@@ -17,3 +17,12 @@ results/figures/*
 # EXCEPCIÓN: el centinela del lockbox SÍ se versiona. Es la prueba de que la
 # evaluación final se ejecutó una sola vez.
 !lockbox/.lockbox_used
+
+# Entorno y secretos
+venv/
+.env
+*.pkl
+
+# Figuras citadas en results/INFORME.md: sí se versionan
+!results/figures/validation_btc.png
+!results/figures/externos.png
