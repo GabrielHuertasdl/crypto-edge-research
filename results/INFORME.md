@@ -16,15 +16,41 @@ cuatro vías independientes a la vez, no por un criterio apretado. **El lockbox
 (2024 → hoy) no se ha abierto** y sigue sellado: el pre-registro lo prohíbe con
 cero finalistas, y `lockbox/.lockbox_used` no existe.
 
+### Por qué cripto no puede validar nada: el contraste de N_eff
+
+El resultado más transferible del proyecto no es sobre ninguna estrategia, es sobre
+el conjunto de datos. Número efectivo de activos independientes por participación
+de autovalores, `(Σλ)²/Σλ²`, sobre la correlación de los retornos diarios:
+
+| cartera | activos | correlación media | **N_eff transversal** |
+|---|---:|---:|---:|
+| BTC, ETH, SOL, LTC (solape común, 1.890 sesiones) | 4 | 0,72 | **1,57** |
+| Oro, S&P 500, EURUSD, USDJPY (solape común, 2.121 sesiones) | 4 | 0,12 | **3,75** |
+
+Cuatro criptomonedas son **una apuesta y media**; cuatro mercados externos son casi
+cuatro. Ese es el motivo de fondo de que este proyecto no pueda concluir nada
+positivo sobre cripto, y es más profundo que la historia corta: **añadir activos
+de cripto no añade información**. Cuando una finalista falla en BTC, ETH, SOL y
+LTC, eso está mucho más cerca de "ha fallado una vez" que de "ha fallado cuatro";
+y al revés, si hubiera pasado en los cuatro tampoco serían cuatro confirmaciones.
+Duplicar el universo de activos de cripto no arregla el problema de potencia: hay
+que cambiar de eje —intradía, o fuentes de datos que no sean el precio— o aceptar
+que la ventaja moderada no es validable con este material.
+
 Matiz que sí sostienen los datos, y que es distinto de "no hay nada":
 
 > El seguimiento de tendencia **sí** aparece fuera de cripto. Sobre 13.709 sesiones
 > de oro, S&P 500, EURUSD y USDJPY anteriores a 2015 —datos que ningún parámetro de
 > este proyecto ha visto— las 19 configuraciones congeladas dan Sharpe conjunto
-> positivo, 13 de ellas con intervalo de confianza que excluye el cero. Pero solo
+> positivo, 15 de ellas con intervalo de confianza que excluye el cero. Pero solo
 > **2 de 19** superan el control de exposición equiparada, así que la mayor parte
 > de ese Sharpe se explica por estar largo en un activo con deriva, no por acertar
 > el momento.
+
+Con una advertencia de construcción que se detalla en §6.1-§6.3: esa cartera
+«de cuatro mercados» tiene 1,66 mercados vivos por sesión de media y el S&P aporta
+el 74,5 % de su varianza, y las 19 configuraciones son N_eff = 2,96 apuestas
+independientes, no 19.
 
 ---
 
@@ -184,7 +210,8 @@ Resultado de las 19 congeladas sobre la cartera equiponderada de los cuatro
 mercados (13.709 sesiones de calendario unido):
 
 - **19 de 19 tienen Sharpe conjunto positivo.** Mediana 0,46.
-- **13 de 19 tienen IC del 95 % que excluye el cero.**
+- **15 de 19 tienen IC del 95 % que excluye el cero** (con los IC corregidos de
+  §6.4; con los publicados originalmente, 14).
 - **Solo 2 de 19 superan el nulo de exposición equiparada** (`ts_momentum(120)` y
   `breakout_volume_confirmed(55,50,1.5)`).
 - Las tres finalistas de cripto dan 0,32 / 0,49 / 0,42 conjunto, y **ninguna**
@@ -215,6 +242,195 @@ autoriza a operarlo en cripto, y no reabre el veredicto. Con el matiz importante
 que ni siquiera fuera de cripto la mayoría de las configuraciones supera el control
 de exposición equiparada: lo que sobrevive con más solidez es la deriva del activo,
 no la sincronización.
+
+### 6.1 Forense de la cartera conjunta: la curtosis de 109 es un solo día
+
+El Sharpe conjunto se calcula sobre una serie con curtosis brutal —hasta 180, y
+109 en `ts_momentum(120)`— y eso hay que explicarlo, no solo reportarlo. Como
+referencia medida sobre estos mismos datos: el oro solo tiene curtosis 7,6, el S&P
+solo 23,8 (11,7 si se quita octubre de 1987), y un buy & hold equiponderado de los
+cuatro mercados en el tramo en que los cuatro cotizan, 10,9 una vez reparadas las
+barras erróneas de divisas. Ningún efecto de calendario ni de agregación llega a
+109.
+
+**Curtosis bruta, recortada al 1 % por cola, y concentración** (conjunta de las
+13.709 sesiones; `n_días` = cuántas observaciones acumulan la mitad del cuarto
+momento):
+
+| configuración | curtosis | recortada 1 % | días para el 50 % de m₄ | 3 peores días | sin octubre 1987 |
+|---|---:|---:|---:|---:|---:|
+| `bollinger_reversion` | 180,8 | 10,0 | 1 | 88,0 % | 33,5 |
+| `zscore_reversion` | 153,2 | 9,0 | 1 | 87,5 % | 28,4 |
+| `ema_cross` | 118,0 | 4,6 | 1 | 94,1 % | 9,9 |
+| `rsi_reversion_in_uptrend` | 110,9 | 54,1 | 8 | 33,4 % | 110,7 |
+| `ts_momentum` | **109,1** | **4,6** | **1** | **92,8 %** | **11,1** |
+| `sma_cross` | 103,7 | 4,8 | 1 | 91,5 % | 10,3 |
+| `ma_slope` | 91,2 | 4,7 | 1 | 89,4 % | 11,2 |
+| *mediana de las 19* | 27,2 | 5,6 | 7 | 39,0 % | 14,5 |
+
+La lectura es inequívoca. Siete de las 19 configuraciones tienen **un solo día que
+explica la mitad del cuarto momento**, y en esas siete los tres peores días explican
+entre el 83 % y el 94 %. Ese día es el **19 de octubre de 1987**, el S&P 500 con
+−20,47 %. De las siete configuraciones con curtosis > 50, cuatro bajan de 15 sin más
+que excluir octubre de 1987. Recortando el 1 % de cada cola, la curtosis mediana es
+5,6 y la de `ts_momentum` cae a 4,6: exactamente lo que se espera de una cartera de
+mercados con colas gruesas. No hay ninguna propiedad distribucional exótica; hay un
+lunes negro.
+
+**Por qué llega sin diluir: la cartera no está diversificada casi nunca.**
+Mercados activos por sesión en el calendario unido:
+
+| mercados activos | sesiones | % |
+|---:|---:|---:|
+| 1 | 9.201 | 67,1 % |
+| 2 | 1.901 | 13,9 % |
+| 3 | 655 | 4,8 % |
+| 4 | 1.952 | 14,2 % |
+
+Media: **1,66 mercados por sesión**. De las 9.201 sesiones con un único mercado,
+8.930 son el S&P solo y 271 el USDJPY solo. Por eras: 1,00 mercados de media entre
+1962 y 1997 (8.779 sesiones), 2,00 entre 1998 y 2004, 3,41 entre 2005 y 2014. La
+primera sesión con los cuatro mercados vivos es el **22 de noviembre de 2004**.
+
+Es decir: la columna «conjunta» es, durante dos tercios de su historia, el S&P 500
+en solitario, y el 19 de octubre de 1987 entra en la cartera con peso 1. La
+etiqueta «13.709 sesiones de cuatro mercados» sugiere una diversificación que solo
+existe en el último 14 % de la muestra.
+
+**Consecuencia sobre el error estándar: ninguna.** Y esto corrige una
+interpretación anterior mía. El SE ingenuo es `sqrt(252/13.709) = 0,136`; el SE por
+block bootstrap tiene mediana **1,04 veces** ese valor (rango 0,95-1,18), y
+excluyendo octubre de 1987 la mediana es 1,04 igualmente. La fórmula de Lo (2002)
+dice por qué: el término de curtosis entra como `(γ₄−3)/4 · SR_d²`, y con un
+Sharpe diario de 0,03-0,04 ese producto es despreciable. Incluso con γ₄ = 109, el
+factor de corrección de Lo sobre el SE es **1,02**.
+
+Es decir: **la curtosis de 109 no ensancha el intervalo del Sharpe**. Lo que sí lo
+ensanchaba en la primera versión de la tabla era un fallo de anualización que se
+detalla en §6.4. El bootstrap sigue siendo la elección correcta —no exige estimar
+un γ₄ que aquí lo fija una sola observación— pero coincide con la regla de bolsillo,
+y la conclusión honesta es que aquí no había nada que corregir.
+
+**Excepción que no es de colas:** `rsi_reversion_in_uptrend` mantiene curtosis 54
+tras el recorte y no cambia al quitar 1987. Su mecanismo es otro: solo el **7,0 %**
+de las sesiones tiene retorno no nulo (exposición media de las patas, 3,9 %). Una
+serie casi siempre en cero tiene curtosis alta por definición. Su Sharpe conjunto
+de 0,15 se apoya en poquísimas observaciones vivas y no debe leerse como el resto.
+
+**Defecto de datos detectado de paso.** La curtosis bruta de las divisas (EURUSD
+98,9; USDJPY 88,5) no es de mercado: son barras erróneas de yfinance. El
+2008-12-08 el OHLC completo de EURUSD está en 1,49 con vecinos en 1,27, y el de
+USDJPY en 110 con vecinos en 92; al día siguiente revierte. El patrón
+pico-reversión aparece en 5 barras de EURUSD y 3 de USDJPY, todas de 2008.
+**Impacto sobre las conclusiones: nulo** — excluyendo esas barras, el Sharpe
+conjunto se mueve como máximo 0,006 (mediana 0,0006), porque las divisas pesan el
+11 % de la varianza. Queda registrado en `results/data_quality.md`.
+
+### 6.2 La columna conjunta está equiponderada por capital, no por riesgo
+
+Reconocimiento explícito de una debilidad de construcción: la cartera conjunta es
+la media simple de los mercados vivos cada día. Reparto real de la varianza
+(covarianza de cada pata con la cartera, media de las 19 configuraciones):
+
+| mercado | cuota de varianza, equiponderado por capital | ídem, ponderando por riesgo ex ante |
+|---|---:|---:|
+| S&P 500 | **74,5 %** | 87,8 % |
+| Oro | 14,2 % | 3,8 % |
+| USDJPY | 7,3 % | 6,3 % |
+| EURUSD | 4,0 % | 2,1 % |
+
+Con un N_eff transversal de 3,75 entre los cuatro mercados, la ponderación por
+riesgo sería la construcción natural: es la que convierte cuatro apuestas casi
+independientes en cuatro contribuciones comparables. **E2.4 no se rehace**, porque
+estaba pre-declarada en `PROTOCOLO_E24.md` y cambiar la construcción después de ver
+los resultados es exactamente lo que el pre-registro existe para impedir.
+
+Pero hay un matiz que conviene decir ahora, porque cambia la lección: **ponderar
+por riesgo no habría arreglado nada**. Aplicando pesos inversos a la volatilidad
+de 252 días rezagada un día, la cuota del S&P **sube** al 87,8 % y los Sharpes
+conjuntos se mueven menos de 0,03 (todos ligeramente a la baja). El motivo es el de
+§6.1: durante el 67 % de las sesiones el S&P es el único mercado vivo, y ningún
+esquema de pesos diversifica lo que no está ahí. El problema no es la ponderación,
+es el calendario.
+
+### 6.3 N_eff de las 19 configuraciones externas, medido y no prestado
+
+En la primera redacción, el N_eff de las 19 configuraciones externas se tomó
+prestado del 3,7 medido sobre las 149 configuraciones de cripto. Eso era un
+préstamo, no una medición, y con mercados externos casi independientes la
+expectativa razonable era que el N_eff de las 19 fuera **mayor**. Medido
+directamente sobre la correlación de las 19 series conjuntas:
+
+| muestra | sesiones | **N_eff de las 19** |
+|---|---:|---:|
+| calendario unido completo | 13.709 | **2,96** |
+| solo sesiones con los 4 mercados vivos | 1.952 | 2,95 |
+| 1998 en adelante | 4.930 | 3,32 |
+| las 76 patas individuales (19 × 4 mercados) | 13.709 | 12,10 |
+| N_eff de las 19 dentro de cada mercado | — | 2,7 (oro) a 3,5 (EURUSD) |
+
+Autovalores de la matriz de correlación de las 19: el primero explica el **55,5 %**
+de la varianza y los dos primeros el 69,7 %; la correlación media fuera de la
+diagonal es 0,48.
+
+**La expectativa era errónea y el dato va en la dirección contraria: 2,96, por
+debajo del 3,7 prestado.** Los mercados externos son casi independientes entre sí,
+pero eso no hace independientes a las 19 configuraciones: se aplican *todas a los
+mismos cuatro mercados*, y lo que domina la correlación entre ellas es el factor
+común de estar largas o planas a la vez en el mismo S&P. La diversificación
+transversal no compra diversificación de configuraciones.
+
+**Las dos lecturas del 2 de 19, sin elegir entre ellas.** Bajo la nula de que
+ninguna configuración tiene sincronización, si cada prueba supera el control de
+exposición equiparada un 5 % de las veces por azar:
+
+| denominador | P(≥ 2 éxitos por azar) |
+|---|---:|
+| 19 pruebas tratadas como independientes | **24,6 %** |
+| N_eff = 3 (medido arriba) | **0,7 %** |
+
+La primera dice que 2 de 19 es lo que se espera del ruido; la segunda, que no lo
+es. Ambas se reportan porque la elección del denominador **no es neutral y no la
+puedo hacer después de ver el resultado**: N_eff mide correlación entre las series
+de retornos, no entre los estadísticos del contraste, y usarlo como número de
+pruebas independientes es una aproximación, no una identidad. Lo que sí es
+defendible sin ambigüedad: 19 pruebas son bastante menos de 19 apuestas, así que la
+corrección por comparaciones múltiples es más severa, no más laxa. Y las dos que superan el nulo de exposición equiparada
+—`ts_momentum(120)` y `breakout_volume_confirmed(55,50,1.5)`— correlacionan **0,61**
+entre sí: están más cerca de un éxito que de dos. La conclusión de §6 no cambia,
+pero se apoya en menos evidencia efectiva de lo que sugiere el denominador 19.
+
+### 6.4 Corrección: los IC de E2.4 estaban anualizados a 365 días
+
+Encontrado al hacer la forense de §6.1. En la primera ejecución de E2.4 el Sharpe
+puntual se anualizó con 252 sesiones (`config.EXTERNAL_TRADING_DAYS_PER_YEAR`,
+correcto para mercados que no cotizan 24/7) pero el intervalo de confianza y el SE
+analítico salieron con 365 (`config.TRADING_DAYS_PER_YEAR`, el de cripto). Punto e
+intervalo no estaban en la misma escala: los IC publicados eran un **20 % más
+anchos** de lo que corresponde, `sqrt(365/252) = 1,204`.
+
+El error es **conservador** —intervalos más anchos, menos criterios superados— así
+que corregirlo no rescata nada, pero cambia dos cifras del informe:
+
+| | publicado (mezcla 252/365) | corregido (252) |
+|---|---|---|
+| SE mediano del Sharpe conjunto | 0,17 | 0,141 |
+| IC del 95 % que excluyen el cero | 14 de 19 | **15 de 19** |
+| Sharpes puntuales | sin cambio | sin cambio |
+| Nulo de exposición equiparada (2 de 19) | sin cambio | sin cambio |
+
+(La primera versión de este informe decía «13 de 19» sobre los intervalos a 365:
+el recuento correcto de esos mismos intervalos es 14. Dos errores distintos, uno de
+anualización y otro de conteo.)
+
+La única que cambia de lado al corregir la escala es `macd_cross(12,50,18)`, de
+[−0,01, 0,72] a [0,03, 0,58]. **No supera el nulo de exposición equiparada**
+(percentil 20,5 %), que es el control que decide, así que la conclusión de §6 no se
+mueve: sigue siendo 2 de 19, y sigue siendo la deriva del activo lo que explica la
+mayor parte del Sharpe conjunto.
+
+Los IC corregidos, para las 19: `results/e24_forense.csv`. El script que reproduce
+toda esta sección es `notebooks/forense_e24.py`.
 
 ---
 
@@ -258,8 +474,10 @@ cuatro apuestas".
 
 ### 7.5 Los cuatro activos son uno
 
-D4: BTC, ETH, SOL y LTC comparten factor de mercado. "Falla en cuatro activos"
-está más cerca de "falla en uno" que de "falla en cuatro". La confirmación
+D4: BTC, ETH, SOL y LTC comparten factor de mercado, con correlación media de
+0,72 y **N_eff transversal de 1,57** frente a 3,75 de los cuatro mercados externos
+(ver el contraste al principio del informe). "Falla en cuatro activos" está más
+cerca de "falla en uno y medio" que de "falla en cuatro". La confirmación
 cross-asset del resultado negativo es más débil de lo que sugiere la tabla.
 
 ### 7.6 Sesgo de supervivencia, y va en contra del veredicto negativo
@@ -284,7 +502,20 @@ impacto de mercado ni el diferencial real en momentos de estrés, que es
 precisamente cuando estas estrategias operan. El coste realista podría ser peor,
 lo que empeoraría el resultado, no lo mejoraría.
 
-### 7.9 Errores míos que sí ocurrieron durante el proyecto
+### 7.9 La evidencia externa descansa en el S&P 500, no en cuatro mercados
+
+Es la objeción más fuerte contra la parte *positiva* del informe. La conclusión de
+que «el seguimiento de tendencia sí aparece fuera de cripto» sale de una cartera
+que es el S&P en solitario el 65 % de las sesiones y donde el S&P aporta el 74,5 %
+de la varianza incluso cuando hay más mercados vivos (§6.1, §6.2). Con
+N_eff = 2,96 entre las 19 configuraciones (§6.3), la evidencia externa está más
+cerca de «la tendencia aparece en el índice bursátil estadounidense de 1962 a 2014»
+que de «aparece en cuatro mercados independientes». Sigue siendo un régimen mucho
+más largo e independiente que cripto —y por eso E2.4 valía la pena—, pero la
+independencia entre mercados que justificaba la potencia de ~99 % del protocolo
+solo se materializa en el último 14 % de la muestra.
+
+### 7.10 Errores míos que sí ocurrieron durante el proyecto
 
 Para calibrar cuánta confianza merece el resto:
 
@@ -297,6 +528,20 @@ Para calibrar cuánta confianza merece el resto:
   test de especificación aparte.
 - La tolerancia del test de perturbación estuvo en 1e-6 cuando la cota derivada es
   1,3e-11: nueve órdenes de magnitud donde se podía esconder una dependencia real.
+- Reporté una curtosis de 109 en la serie conjunta de E2.4 sin explicarla. Era el
+  19 de octubre de 1987 (§6.1): un solo día, con la cartera compuesta por el S&P en
+  solitario. Recortada al 1 %, la curtosis es 4,6.
+- Usé el N_eff de 3,7 medido sobre las 149 configuraciones de cripto para hablar de
+  las 19 externas, sin medirlo. Medido, es 2,96 (§6.3), y mi expectativa de que
+  fuera mayor que 4 también era errónea.
+- Construí la cartera conjunta equiponderada por capital y describí sus 13.709
+  sesiones como si fueran de cuatro mercados. Son 1,66 mercados por sesión de
+  media.
+- Publiqué los IC de E2.4 anualizados a 365 días junto a Sharpes anualizados a 252
+  (§6.4): intervalos un 20 % más anchos de lo debido, y un «13 de 19» que sobre esos
+  mismos intervalos era 14.
+- Atribuí el ensanchamiento del SE a la curtosis. No era la curtosis —su efecto
+  sobre el SE del Sharpe aquí es del 2 %—, era el fallo de anualización.
 
 Los cuatro se detectaron y corrigieron, tres de ellos a instancias del revisor. Es
 razonable suponer que quedan errores del mismo tipo sin detectar.
@@ -316,9 +561,40 @@ razonable suponer que quedan errores del mismo tipo sin detectar.
   correlacionados, **la potencia estadística disponible no permite validar una
   ventaja moderada**. Ese es el resultado estructural del proyecto.
 
+### Lecciones de construcción para una v2
+
+Salen de la forense de §6 y son restricciones de diseño, no de resultado:
+
+1. **Ponderar las carteras multi-mercado por riesgo, no por capital**, y declararlo
+   en el pre-registro. Aquí no habría cambiado el número (§6.2), pero solo porque
+   el calendario ya estaba roto; con mercados solapados sí lo cambia.
+2. **Exigir calendario común, o reportar los mercados por separado.** Una media
+   sobre «los mercados vivos ese día» convierte una cartera en un solo activo
+   durante los tramos antiguos, y deja pasar un −20 % con peso 1. Lo honesto es
+   restringir al solape (aquí, 2005-2014) y reportar el tramo largo mercado a
+   mercado.
+3. **Medir el N_eff de cada conjunto de pruebas, nunca importarlo de otro.** El
+   préstamo de §6.3 falló por 0,74 y en la dirección contraria a la esperada.
+4. **Reportar toda curtosis con su versión recortada y con la concentración del
+   cuarto momento.** Un estadístico que depende de una observación tiene que
+   declararlo en la misma línea en la que se reporta.
+5. **Validar la integridad de las fuentes externas con el mismo rigor que las de
+   cripto.** Las barras erróneas de divisas de 2008 (§6.1) eran inocuas aquí por
+   pura suerte de ponderación.
+6. **Retirar C4 (≥ 50 operaciones).** Era un proxy tosco de la precisión de la
+   estimación y es **redundante con E1.1**: el IC del Sharpe por bootstrap mide lo
+   mismo —cuánta información hay— sin penalizar por construcción a la baja
+   frecuencia, que es justo donde está la familia con mejor evidencia previa
+   (§7.2, §7.3). Se mantuvo aquí porque estaba pre-registrado; en un rediseño
+   desaparece.
+7. **Anualizar en un solo sitio.** El fallo de §6.4 fue posible porque el punto y el
+   intervalo leían la constante por separado; ahora `sharpe_confidence_interval`
+   toma un `periods` compartido y hay un test de regresión que lo fija.
+
 ---
 
 *Todo lo anterior es reproducible: `.venv/bin/python -m pytest tests/ -q`
-(698 tests), `results/trials_log.csv` (685 evaluaciones registradas),
+(699 tests), `results/trials_log.csv` (685 evaluaciones registradas),
+la forense de E2.4 en `notebooks/forense_e24.py` y `results/e24_forense.csv`,
 y el historial de git, donde el pre-registro y sus tres enmiendas son anteriores
 al primer trial.*

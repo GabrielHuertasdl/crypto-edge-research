@@ -295,3 +295,26 @@ def test_correlacion_media_entre_columnas():
     comun = rng.normal(0, 1, (2000, 1))
     juntas = np.sqrt(0.7) * comun + np.sqrt(0.3) * rng.normal(0, 1, (2000, 10))
     assert abs(st.mean_pairwise_correlation(juntas) - 0.7) < 0.1
+
+
+def test_ic_del_sharpe_usa_una_sola_anualizacion():
+    """Punto, extremos del intervalo y SE analítico comparten `periods`.
+
+    Regresión del fallo de E2.4: el Sharpe puntual salió anualizado a 252 y el
+    intervalo a 365, lo que ensanchó los IC publicados un 20 % (`sqrt(365/252)`).
+    """
+    rng = np.random.default_rng(0)
+    r = rng.normal(0.0004, 0.01, 4000)
+
+    ci_252 = st.sharpe_confidence_interval(r, periods=252, seed=42)
+    ci_365 = st.sharpe_confidence_interval(r, periods=365, seed=42)
+
+    factor = np.sqrt(365 / 252)
+    assert ci_365.point == pytest.approx(ci_252.point * factor, rel=1e-12)
+    assert ci_365.lo == pytest.approx(ci_252.lo * factor, rel=1e-12)
+    assert ci_365.hi == pytest.approx(ci_252.hi * factor, rel=1e-12)
+    assert ci_365.se_analytic == pytest.approx(ci_252.se_analytic * factor, rel=1e-12)
+
+    # el ancho del IC es coherente con el SE de la regla de bolsillo, sqrt(A/T)
+    ancho_se = (ci_252.hi - ci_252.lo) / (2 * 1.959964)
+    assert ancho_se == pytest.approx(np.sqrt(252 / len(r)), rel=0.15)

@@ -136,3 +136,33 @@ Los huecos no se imputan entre fuentes: mezclar precios mete retornos falsos.
 | 2017-09-04 | 71.29 | 65.21 | 9.33% |
 | 2017-09-14 | 45.42 | 41.58 | 9.22% |
 | … | | | (+156 más) |
+
+---
+
+## Series externas (yfinance) — barras erróneas en divisas
+
+Detectadas al explicar la curtosis de la cartera conjunta de E2.4
+(`results/INFORME.md` §6.1). Criterio: `|r| > 4 %` seguido de una reversión de al
+menos el 70 % al día siguiente.
+
+| mercado | barras | fechas |
+|---|---:|---|
+| EURUSD | 5 | 2008-01-08, 2008-02-08, 2008-09-07, 2008-10-07, **2008-12-08** |
+| USDJPY | 3 | 2008-04-07, 2008-10-07, **2008-12-08** |
+| Oro | 0 | — |
+| S&P 500 | 10 | movimientos reales de 1997 y del otoño de 2008, no defectos |
+
+El caso claro es el **2008-12-08**: el OHLC completo de EURUSD está en 1,4899 /
+1,4964 / 1,4818 / 1,4918 con vecinos en 1,27, y el de USDJPY en 110,09 / 110,35 /
+109,11 / 109,24 con vecinos en 92. Es toda la barra, no un extremo suelto, y ambos
+pares fallan el mismo día: es un dato malo de la fuente, no un movimiento de
+mercado. El spot no se mueve un 17 % en una sesión.
+
+Efecto sobre las conclusiones: **ninguno**. Excluyendo esas barras, el Sharpe
+conjunto de las 19 configuraciones congeladas cambia como máximo 0,006 (mediana
+0,0006), porque las divisas aportan el 11,3 % de la varianza de la cartera. No se
+corrige la serie porque E2.4 estaba pre-declarada y el resultado no depende de ello;
+queda registrado aquí para que una v2 lo trate en la carga de datos.
+
+Las tres barras dejan huella en la curtosis bruta de las divisas: EURUSD 98,9 y
+USDJPY 88,5, frente a 3,4 y 3,3 recortando el 1 % de cada cola.

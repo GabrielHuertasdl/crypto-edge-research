@@ -130,24 +130,31 @@ def sharpe_confidence_interval(
     n_paths: int | None = None,
     mean_block: int | None = None,
     seed: int | None = None,
+    periods: int | None = None,
 ) -> SharpeInterval:
     """IC del Sharpe anualizado por bootstrap de bloques.
 
     Se remuestrea la propia serie de retornos de la estrategia, así que el
     intervalo hereda su autocorrelación y su curtosis en vez de suponer
     normalidad.
+
+    `periods` fija la anualización de los TRES números a la vez (punto, extremos
+    del intervalo y SE analítico). Existe porque en E2.4 el punto salió a 252 y el
+    intervalo a 365, y el resultado fueron IC un 20 % más anchos de lo debido; con
+    un solo parámetro compartido ese desajuste ya no es representable.
     """
+    periods = config.TRADING_DAYS_PER_YEAR if periods is None else periods
     r = np.asarray(returns, dtype=float)
     paths = stationary_block_bootstrap(r, n_paths=n_paths, mean_block=mean_block, seed=seed)
     sd = paths.std(axis=1, ddof=1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        srs = np.where(sd > 0, paths.mean(axis=1) / sd * np.sqrt(config.TRADING_DAYS_PER_YEAR), 0.0)
+        srs = np.where(sd > 0, paths.mean(axis=1) / sd * np.sqrt(periods), 0.0)
     alpha = (1.0 - level) / 2.0
     lo, hi = np.quantile(srs, [alpha, 1.0 - alpha])
     return SharpeInterval(
-        point=annualized_sharpe(r),
+        point=annualized_sharpe(r, periods=periods),
         lo=float(lo), hi=float(hi),
-        se_analytic=sharpe_standard_error(r),
+        se_analytic=sharpe_standard_error(r, periods=periods),
         n_obs=len(r), level=level,
     )
 
